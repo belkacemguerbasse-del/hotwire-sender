@@ -1,0 +1,32 @@
+# Environnement Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Outils éditeurs
+.idea/
+.vscode/
+*.swp
+*~
+
+# Builds / dist
+build/
+dist/
+*.spec
+
+# Captures caméra (ne devraient pas être ici mais au cas où)
+captures/
+*.jpg
+*.jpeg
+*.png
+
+# Logs
+*.log
