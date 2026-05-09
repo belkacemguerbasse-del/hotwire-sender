@@ -244,6 +244,7 @@ class MainWindow(QMainWindow):
         )
         self.job.elapsed_tick.connect(self.gcode.set_elapsed)
         self.job.finished.connect(lambda: self.statusBar().showMessage("Programme terminé"))
+        self.job.pause_with_message.connect(self._on_job_pause)
 
     # ---------- Slots ----------
 
@@ -283,6 +284,43 @@ class MainWindow(QMainWindow):
         if line.startswith("error:") or line.lower().startswith("alarm"):
             self.job.pause()
             self.status.append_info(f"Job en pause : {line}")
+
+    def _on_job_pause(self, message: str) -> None:
+        """Affiché quand le runner rencontre un `; @HW_PAUSE:` (entre panneaux
+        d'une aile multi-panneaux). Coupe le fil chaud par sécurité, attend
+        la confirmation user, puis reprend."""
+        from PySide6.QtWidgets import QMessageBox
+
+        # Sécurité : coupe le fil chaud pendant la pause
+        self.hotwire.force_off()
+        self.status.append_info(f"PAUSE — {message}")
+        self.statusBar().showMessage("Programme en pause — repositionne et continue")
+
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Information)
+        box.setWindowTitle("Pause programme")
+        box.setText("⏸  Programme en pause")
+        box.setInformativeText(
+            f"{message}\n\n"
+            "• Le fil chaud a été coupé par sécurité.\n"
+            "• Vérifie que la machine est bien à l'arrêt.\n"
+            "• Repositionne le bloc de mousse.\n"
+            "• Clique sur Continuer pour lancer le panneau suivant.\n"
+            "• Clique sur Annuler pour stopper complètement le programme."
+        )
+        btn_continue = box.addButton("Continuer", QMessageBox.AcceptRole)
+        btn_cancel = box.addButton("Annuler", QMessageBox.RejectRole)
+        box.setDefaultButton(btn_continue)
+        box.exec()
+
+        if box.clickedButton() is btn_cancel:
+            self.status.append_info("Programme annulé par l'utilisateur.")
+            self.job.stop()
+            return
+
+        self.status.append_info("Reprise du programme.")
+        self.statusBar().showMessage("En cours…")
+        self.job.resume_from_logical_pause()
 
     def _on_camera_visibility(self, visible: bool) -> None:
         # Synchronise l'état checked du bouton header avec le dock

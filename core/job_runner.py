@@ -10,11 +10,16 @@ import time
 from PySide6.QtCore import QObject, QTimer, Signal, Slot
 
 
+HW_PAUSE_PREFIX = "; @HW_PAUSE:"
+
+
 class JobRunner(QObject):
     line_sent = Signal(int)              # zero-based index
     line_acked = Signal(int, bool)       # zero-based index, ok=True
     finished = Signal()
     elapsed_tick = Signal(str)           # HH:MM:SS
+    pause_with_message = Signal(str)     # message à afficher à l'utilisateur
+    resumed_after_pause = Signal()       # quand l'utilisateur a relancé après une pause logique
 
     def __init__(self, link, parent: QObject | None = None):
         super().__init__(parent)
@@ -51,12 +56,22 @@ class JobRunner(QObject):
         self._pump()
 
     def pause(self) -> None:
+        """Pause demandée par l'utilisateur ou auto sur erreur : envoie un
+        feed hold au firmware en plus de stopper le pump."""
         self._paused = True
         self.link.feed_hold()
 
     def resume(self) -> None:
+        """Reprise après une pause utilisateur (feed hold)."""
         self._paused = False
         self.link.cycle_start()
+        self._pump()
+
+    def resume_from_logical_pause(self) -> None:
+        """Reprise après une pause logique `; @HW_PAUSE:` (pas de cycle_start
+        car le firmware n'a jamais été en feed hold)."""
+        self._paused = False
+        self.resumed_after_pause.emit()
         self._pump()
 
     def stop(self) -> None:
@@ -75,20 +90,34 @@ class JobRunner(QObject):
         while self._cursor_send < len(self._lines):
             ln = self._lines[self._cursor_send]
             stripped = ln.strip()
+
+            # Pause logicielle : on s'arrête, on ack la ligne (pour la barre
+            # de progression) et on émet un signal pour que la MainWindow
+            # affiche le popup.
+            if stripped.startswith(HW_PAUSE_PREFIX):
+                msg = stripped[len(HW_PAUSE_PREFIX):].strip()
+                idx = self._cursor_send
+                self._cursor_send += 1
+                self._cursor_ack = max(self._cursor_ack, self._cursor_send)
+                self.line_sent.emit(idx)
+                self.line_acked.emit(idx, True)
+                self._paused = True
+                self.pause_with_message.emit(msg)
+                return
+
             if not stripped or stripped.startswith(";"):
-                # Lignes vides / commentaires: marquer ok directement
+                # Lignes vides / commentaires : ack immédiat
                 idx = self._cursor_send
                 self._cursor_send += 1
                 self._cursor_ack = max(self._cursor_ack, self._cursor_send)
                 self.line_sent.emit(idx)
                 self.line_acked.emit(idx, True)
                 continue
+
             self.link.send_line(stripped)
             self.line_sent.emit(self._cursor_send)
             self._cursor_send += 1
-            # On laisse le streamer gérer le débit; on continue à pousser
-            # car GrblLink met en file interne.
-            # Mais on plafonne pour ne pas bloquer l'UI:
+            # Plafonnement pour ne pas bloquer l'UI
             if self._cursor_send % 64 == 0:
                 break
         if self._cursor_send >= len(self._lines) and self._cursor_ack >= len(self._lines):

@@ -227,8 +227,13 @@ def generate_gcode_wing(
                 f"G0 X{params.safe_x:.3f} Y{params.safe_y:.3f} "
                 f"A{params.safe_x:.3f} Z{params.safe_y:.3f}"
             )
-            out.append(f"; >>> Repositionner le bloc pour le panneau {i + 2} <<<")
-            out.append("M0")
+            # Pause logicielle : le JobRunner s'arrête sur cette ligne et
+            # affiche un dialog modal. Pas de M0 firmware (comportement
+            # imprévisible selon les builds Grbl).
+            out.append(
+                f"; @HW_PAUSE: Repositionner le bloc de mousse pour le "
+                f"panneau {i + 2}/{wing.n_panels}, puis cliquez OK pour continuer."
+            )
     out.append(
         f"G0 X{params.safe_x:.3f} Y{params.safe_y:.3f} "
         f"A{params.safe_x:.3f} Z{params.safe_y:.3f}"
