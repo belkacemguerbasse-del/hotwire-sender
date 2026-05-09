@@ -165,6 +165,32 @@ def resample(p: Profile, n_points: int) -> Profile:
     return Profile(name=p.name, points=out)
 
 
+def morph(p1: Profile, p2: Profile, t: float, n_points: int = 200) -> Profile:
+    """Interpolation linéaire entre 2 profils en coordonnées normalisées.
+
+    `t` ∈ [0, 1] : `0` = p1, `1` = p2. On ré-échantillonne les 2 profils sur
+    `n_points` points équirépartis en longueur d'arc puis on interpole point
+    à point. Méthode standard pour faire un morphing d'airfoil (utilisée par
+    XFLR5, Profili, etc.).
+
+    Pré-requis : les 2 profils doivent être normalisés sur la même corde
+    (typiquement [0..1]) avant l'appel.
+    """
+    if not (0.0 <= t <= 1.0):
+        t = max(0.0, min(1.0, t))
+    if t == 0.0:
+        return resample(p1, n_points)
+    if t == 1.0:
+        return resample(p2, n_points)
+    a = resample(p1, n_points)
+    b = resample(p2, n_points)
+    pts = [
+        ((1 - t) * ax + t * bx, (1 - t) * ay + t * by)
+        for (ax, ay), (bx, by) in zip(a.points, b.points)
+    ]
+    return Profile(name=f"{p1.name} -> {p2.name} ({int(t * 100)}%)", points=pts)
+
+
 def kerf_offset(p: Profile, offset_mm: float) -> Profile:
     """Décale chaque point selon la normale extérieure d'une distance `offset_mm`.
     Positif = vers l'extérieur (compense le sillage du fil chaud)."""

@@ -5,9 +5,11 @@ Affiche les 2383 profils extraits de Profili 2 Pro avec :
 - filtres par épaisseur min/max et cambrure min/max
 - aperçu live du profil sélectionné
 - métadonnées (épaisseur %, position max épaisseur, cambrure %)
-- 2 boutons d'action : « Charger comme emplanture » / « Charger comme saumon »
+- 1 bouton d'action générique « Sélectionner ce profil »
 
-Le dialog renvoie le chemin du fichier .dat sélectionné via un Signal.
+Le dialog renvoie le chemin du fichier .dat sélectionné via le signal
+`profile_selected(file_path)`. L'appelant décide quoi en faire (emplanture,
+saumon, section N, etc.).
 """
 
 from __future__ import annotations
@@ -40,10 +42,14 @@ INDEX_PATH = Path(__file__).resolve().parent.parent.parent / "resources" / "airf
 
 
 class AirfoilLibraryDialog(QDialog):
-    profile_selected = Signal(str, str)  # ('root'|'tip', file_path)
+    """Dialog autonome de sélection de profil. Émet `profile_selected(file_path)`."""
 
-    def __init__(self, parent: QWidget | None = None):
+    profile_selected = Signal(str)  # file_path
+
+    def __init__(self, button_label: str = "Sélectionner ce profil",
+                 parent: QWidget | None = None):
         super().__init__(parent)
+        self._button_label = button_label
         self.setWindowTitle("Bibliothèque de profils — Profili 2 Pro")
         self.resize(1100, 720)
 
@@ -129,25 +135,20 @@ class AirfoilLibraryDialog(QDialog):
         v_prev.addWidget(self.plot, 1)
         v_prev.addWidget(self.lbl_note)
 
-        # --- Boutons d'action ---
-        self.btn_root = QPushButton("Charger comme emplanture")
-        self.btn_root.setProperty("variant", "primary")
-        self.btn_root.setMinimumHeight(36)
-        self.btn_root.clicked.connect(lambda: self._emit_choice("root"))
+        # --- Bouton d'action générique ---
+        self.btn_select = QPushButton(self._button_label)
+        self.btn_select.setProperty("variant", "primary")
+        self.btn_select.setMinimumHeight(36)
+        self.btn_select.setMinimumWidth(220)
+        self.btn_select.clicked.connect(self._emit_choice)
 
-        self.btn_tip = QPushButton("Charger comme saumon")
-        self.btn_tip.setProperty("variant", "primary")
-        self.btn_tip.setMinimumHeight(36)
-        self.btn_tip.clicked.connect(lambda: self._emit_choice("tip"))
-
-        self.btn_close = QPushButton("Fermer")
+        self.btn_close = QPushButton("Annuler")
         self.btn_close.setMinimumHeight(36)
         self.btn_close.clicked.connect(self.close)
 
         actions = QHBoxLayout()
-        actions.addWidget(self.btn_root)
-        actions.addWidget(self.btn_tip)
         actions.addStretch(1)
+        actions.addWidget(self.btn_select)
         actions.addWidget(self.btn_close)
 
         # --- Splitter principal ---
@@ -250,9 +251,10 @@ class AirfoilLibraryDialog(QDialog):
     def _path_of(self, profile: dict) -> Path:
         return INDEX_PATH.parent / profile["file"]
 
-    def _emit_choice(self, side: str) -> None:
+    def _emit_choice(self) -> None:
         item = self.list_w.currentItem()
         if item is None:
             return
         p = item.data(Qt.UserRole)
-        self.profile_selected.emit(side, str(self._path_of(p)))
+        self.profile_selected.emit(str(self._path_of(p)))
+        self.accept()
