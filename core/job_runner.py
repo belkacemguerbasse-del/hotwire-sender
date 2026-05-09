@@ -30,8 +30,15 @@ class JobRunner(QObject):
         self._running = False
         self._paused = False
         self._t0: float | None = None
+        # Pause logicielle en attente : on a vu @HW_PAUSE mais on attend
+        # que tout le firmware ait fini d'exécuter ce qui était devant
+        # avant d'afficher le popup utilisateur.
+        self._pending_pause_msg: str | None = None
+        self._pending_pause_idx: int = -1
+        self._last_state: str = "Unknown"
 
         self.link.line_received.connect(self._on_rx)
+        self.link.status_received.connect(self._on_status)
 
         self._tick = QTimer(self)
         self._tick.setInterval(500)
@@ -77,6 +84,8 @@ class JobRunner(QObject):
     def stop(self) -> None:
         self._running = False
         self._paused = False
+        self._pending_pause_msg = None
+        self._pending_pause_idx = -1
         self._tick.stop()
         self.link.soft_reset()
         self._t0 = None
@@ -87,22 +96,25 @@ class JobRunner(QObject):
     def _pump(self) -> None:
         if not self._running or self._paused:
             return
+        # Si une pause est en attente, on n'avance plus (on attendra que le
+        # firmware ait fini d'exécuter ce qui est devant, géré par _on_status
+        # et _on_rx).
+        if self._pending_pause_msg is not None:
+            return
         while self._cursor_send < len(self._lines):
             ln = self._lines[self._cursor_send]
             stripped = ln.strip()
 
-            # Pause logicielle : on s'arrête, on ack la ligne (pour la barre
-            # de progression) et on émet un signal pour que la MainWindow
-            # affiche le popup.
+            # Pause logicielle : on note la pause demandée et on s'arrête.
+            # NE PAS consommer la ligne tout de suite : on veut qu'elle soit
+            # consommée seulement quand le firmware sera arrivé physiquement
+            # à cette position (état Idle + tous les acks reçus).
             if stripped.startswith(HW_PAUSE_PREFIX):
                 msg = stripped[len(HW_PAUSE_PREFIX):].strip()
-                idx = self._cursor_send
-                self._cursor_send += 1
-                self._cursor_ack = max(self._cursor_ack, self._cursor_send)
-                self.line_sent.emit(idx)
-                self.line_acked.emit(idx, True)
-                self._paused = True
-                self.pause_with_message.emit(msg)
+                self._pending_pause_msg = msg
+                self._pending_pause_idx = self._cursor_send
+                # Tente de déclencher tout de suite si plus rien en vol
+                self._maybe_trigger_pending_pause()
                 return
 
             if not stripped or stripped.startswith(";"):
@@ -123,6 +135,43 @@ class JobRunner(QObject):
         if self._cursor_send >= len(self._lines) and self._cursor_ack >= len(self._lines):
             self._finish()
 
+    def _maybe_trigger_pending_pause(self) -> None:
+        """Déclenche le popup de pause SEULEMENT si :
+        - une pause logique est en attente
+        - tout ce qu'on a envoyé a été acké par le firmware
+        - le firmware est en état Idle (tous les mouvements terminés)
+        """
+        if self._pending_pause_msg is None:
+            return
+        if self._cursor_ack < self._cursor_send:
+            return
+        # On veut Idle ; on accepte aussi 'Check' (mode vérif sans bouger)
+        if self._last_state not in ("Idle", "Check"):
+            return
+        # Consomme la ligne @HW_PAUSE
+        idx = self._pending_pause_idx
+        if 0 <= idx < len(self._lines):
+            self._cursor_send = max(self._cursor_send, idx + 1)
+            self._cursor_ack = max(self._cursor_ack, idx + 1)
+            self.line_sent.emit(idx)
+            self.line_acked.emit(idx, True)
+        msg = self._pending_pause_msg
+        self._pending_pause_msg = None
+        self._pending_pause_idx = -1
+        self._paused = True
+        self.pause_with_message.emit(msg)
+
+    @Slot(object)
+    def _on_status(self, status) -> None:
+        """Reçoit chaque status report Grbl. Sert à déclencher la pause
+        logique en attente quand le firmware arrive en état Idle."""
+        try:
+            self._last_state = status.state
+        except Exception:
+            return
+        if self._pending_pause_msg is not None:
+            self._maybe_trigger_pending_pause()
+
     @Slot(str)
     def _on_rx(self, line: str) -> None:
         if not self._running:
@@ -133,6 +182,10 @@ class JobRunner(QObject):
             if idx < len(self._lines):
                 self.line_acked.emit(idx, ok)
             self._cursor_ack += 1
+            # Si on attend de pauser, on essaye à chaque ack
+            if self._pending_pause_msg is not None:
+                self._maybe_trigger_pending_pause()
+                return
             if self._cursor_ack >= len(self._lines) and self._cursor_send >= len(self._lines):
                 self._finish()
             else:

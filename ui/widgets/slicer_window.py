@@ -276,10 +276,19 @@ class SlicerWindow(QDialog):
         self.btn_add_section.setMinimumHeight(32)
         self.btn_add_section.clicked.connect(self._add_section)
 
+        self.btn_new = QPushButton("🆕  Nouveau")
+        self.btn_new.setMinimumHeight(32)
+        self.btn_new.setToolTip(
+            "Réinitialise l'aile à 2 sections vierges (sans profil chargé). "
+            "Les paramètres machine et coupe sont conservés."
+        )
+        self.btn_new.clicked.connect(self._reset_to_blank)
+
         gb_sections = QGroupBox("Aile (sections)")
         v_sec = QVBoxLayout(gb_sections)
         v_sec.addWidget(self._sections_scroll)
         sec_actions = QHBoxLayout()
+        sec_actions.addWidget(self.btn_new)
         sec_actions.addWidget(self.btn_add_section)
         sec_actions.addStretch(1)
         self.lbl_sections_info = QLabel("")
@@ -441,6 +450,33 @@ class SlicerWindow(QDialog):
         self._sections_layout.removeWidget(panel)
         panel.setParent(None)
         panel.deleteLater()
+        self._update_section_indices()
+        self._update_preview()
+
+    def _reset_to_blank(self) -> None:
+        """Vide toutes les sections et repart sur 2 sections vierges."""
+        # Confirmation si on a au moins un profil chargé
+        loaded = any(p.section.profile is not None for p in self._sections)
+        if loaded:
+            answer = QMessageBox.question(
+                self, "Nouveau projet",
+                "Réinitialiser l'aile à 2 sections vierges ?\n"
+                "Les profils chargés et leurs paramètres seront perdus.\n"
+                "(Les paramètres machine et coupe sont conservés.)",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if answer != QMessageBox.Yes:
+                return
+        # Supprime tous les panels existants
+        while self._sections:
+            p = self._sections.pop()
+            self._sections_layout.removeWidget(p)
+            p.setParent(None)
+            p.deleteLater()
+        # Repart sur 2 sections vierges
+        for _ in range(MIN_SECTIONS):
+            self._add_section(emit_change=False)
         self._update_section_indices()
         self._update_preview()
 
