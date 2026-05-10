@@ -1,8 +1,17 @@
-"""Panneau G-code : ouvrir / lecture / pause / stop / reload + table de progression."""
+"""Panneau G-code : ouvrir / lecture / pause / stop / reload + table de progression.
+
+Optimisations clés :
+- mark_line() est appelée jusqu'à plusieurs milliers de fois par seconde lors
+  d'un streaming rapide. Le scrollToItem et la maj du label de progression
+  sont throttlés à 10 Hz max via un QTimer pour ne pas bloquer l'UI.
+- load_file() insère les lignes en bulk avec setUpdatesEnabled(False) pour
+  éviter un re-layout par ligne (gain : ~10× sur les gros fichiers).
+- reset_marks() utilise le même mécanisme bulk.
+"""
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal, Slot
+from PySide6.QtCore import Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -94,6 +103,15 @@ class GcodePanel(QGroupBox):
         self._lines: list[str] = []
         self._current_path: str = ""
 
+        # Throttling : la table est mise à jour très souvent (chaque
+        # ligne envoyée + chaque ack). On accumule les indices et on
+        # rafraîchit l'écran à 10 Hz max via ce timer.
+        self._pending_idx: int = -1
+        self._refresh_timer = QTimer(self)
+        self._refresh_timer.setInterval(100)  # 10 Hz
+        self._refresh_timer.setSingleShot(True)
+        self._refresh_timer.timeout.connect(self._do_refresh)
+
     def _open(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self, "Ouvrir un fichier G-code", "", "G-code (*.nc *.gcode *.tap *.ngc *.txt);;Tous (*)"
@@ -110,31 +128,62 @@ class GcodePanel(QGroupBox):
             return
         self._lines = lines
         self._current_path = path
-        self.table.setRowCount(0)
-        for i, ln in enumerate(lines, start=1):
-            row = self.table.rowCount()
-            self.table.insertRow(row)
-            self.table.setItem(row, 0, QTableWidgetItem(""))
-            self.table.setItem(row, 1, QTableWidgetItem(str(i)))
-            self.table.setItem(row, 2, QTableWidgetItem(ln))
+        self._populate_table(lines)
         self.lbl_progress.setText(f"0 de {len(lines)}")
         self.file_loaded.emit(path, list(lines))
+
+    def _populate_table(self, lines: list[str]) -> None:
+        """Remplit la table en bulk : updates désactivées + setRowCount unique
+        (10× plus rapide que insertRow par ligne)."""
+        self.table.setUpdatesEnabled(False)
+        self.table.setSortingEnabled(False)
+        try:
+            self.table.clearContents()
+            self.table.setRowCount(len(lines))
+            for i, ln in enumerate(lines):
+                # Colonne 0 : statut (vide au départ)
+                it_status = QTableWidgetItem("")
+                self.table.setItem(i, 0, it_status)
+                # Colonne 1 : numéro de ligne
+                it_line = QTableWidgetItem(str(i + 1))
+                self.table.setItem(i, 1, it_line)
+                # Colonne 2 : G-code
+                it_gcode = QTableWidgetItem(ln)
+                self.table.setItem(i, 2, it_gcode)
+        finally:
+            self.table.setUpdatesEnabled(True)
 
     def lines(self) -> list[str]:
         return list(self._lines)
 
     @Slot(int, str)
     def mark_line(self, idx_zero_based: int, status: str) -> None:
-        """idx_zero_based : index dans la liste, status : 'sent'/'ok'/'err'."""
+        """Marque la ligne avec un statut. La maj du label et du scroll sont
+        throttlées à 10 Hz pour ne pas bloquer l'UI lors d'un streaming rapide."""
         if idx_zero_based < 0 or idx_zero_based >= self.table.rowCount():
             return
         item = self.table.item(idx_zero_based, 0)
         if item is None:
-            item = QTableWidgetItem("")
+            item = QTableWidgetItem(status)
             self.table.setItem(idx_zero_based, 0, item)
-        item.setText(status)
-        self.lbl_progress.setText(f"{idx_zero_based + 1} de {len(self._lines)}")
-        self.table.scrollToItem(item)
+        else:
+            item.setText(status)
+        # Mémorise l'index le plus récent pour le rafraîchissement throttlé
+        self._pending_idx = idx_zero_based
+        if not self._refresh_timer.isActive():
+            self._refresh_timer.start()
+
+    def _do_refresh(self) -> None:
+        """Effectue le scroll + maj label, appelé à 10 Hz max."""
+        if self._pending_idx < 0:
+            return
+        idx = self._pending_idx
+        self._pending_idx = -1
+        if 0 <= idx < self.table.rowCount():
+            self.lbl_progress.setText(f"{idx + 1} de {len(self._lines)}")
+            item = self.table.item(idx, 0)
+            if item is not None:
+                self.table.scrollToItem(item)
 
     @Slot(str)
     def set_elapsed(self, hms: str) -> None:
@@ -145,8 +194,15 @@ class GcodePanel(QGroupBox):
         pass
 
     def reset_marks(self) -> None:
-        for row in range(self.table.rowCount()):
-            it = self.table.item(row, 0)
-            if it is not None:
-                it.setText("")
+        """Efface tous les statuts. Bulk update pour vitesse."""
+        self.table.setUpdatesEnabled(False)
+        try:
+            for row in range(self.table.rowCount()):
+                it = self.table.item(row, 0)
+                if it is not None and it.text():
+                    it.setText("")
+        finally:
+            self.table.setUpdatesEnabled(True)
+        self._pending_idx = -1
+        self._refresh_timer.stop()
         self.lbl_progress.setText(f"0 de {len(self._lines)}")

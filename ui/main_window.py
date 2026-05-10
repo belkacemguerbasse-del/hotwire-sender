@@ -330,7 +330,8 @@ class MainWindow(QMainWindow):
         delta = time.monotonic() - self._last_status_ts
         if delta < self._watchdog_threshold_s:
             return
-        # ALERTE
+        # ALERTE — on évite tout popup modal qui bloquerait l'event loop.
+        # Le user voit l'alerte dans le header, le log et la status bar.
         self._watchdog_triggered = True
         self.hotwire.force_off()
         self.job.pause()
@@ -339,10 +340,9 @@ class MainWindow(QMainWindow):
             "Fil coupé, job en pause. Vérifie le câble USB et le firmware."
         )
         self.status.append_info(msg)
-        self.statusBar().showMessage(msg)
-        # Affiche aussi un popup non bloquant
-        from PySide6.QtWidgets import QMessageBox
-        QMessageBox.warning(self, "Watchdog déclenché", msg)
+        self.statusBar().showMessage(msg, 10000)
+        # Force le state header en "Alarm" visuel
+        self.header.on_state("Alarm")
 
     def _on_line_for_error_pause(self, line: str) -> None:
         """Pause auto du job si une erreur Grbl arrive pendant l'exécution."""
@@ -538,6 +538,12 @@ class MainWindow(QMainWindow):
             return
         self.gcode.reset_marks()
         self.job.load(self.gcode.lines())
+        # Reset le timestamp du watchdog : on ne veut pas qu'il déclenche
+        # immédiatement parce que le dernier status date de quelques secondes
+        # (cas typique : utilisateur idle puis clique Lancer).
+        import time
+        self._last_status_ts = time.monotonic()
+        self._watchdog_triggered = False
         self.job.start()
 
     def _on_pause(self) -> None:

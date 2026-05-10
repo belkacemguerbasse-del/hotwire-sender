@@ -1,0 +1,44 @@
+{
+  "format": "hotwire-project",
+  "version": 1,
+  "saved_at": "2026-05-10T23:59:55",
+  "wing": {
+    "sections": [
+      {
+        "span_y_mm": 0.0,
+        "profile_path": "C:\\Users\\kaiez\\grbl-Mega-5X\\hotwire-sender\\resources\\airfoils\\0168_CLARK X.dat",
+        "profile_name": "CLARK X",
+        "chord_mm": 200.0,
+        "twist_deg": 0.0,
+        "offset_x_mm": 0.0,
+        "offset_y_mm": 0.0,
+        "kerf_mm": 0.0
+      },
+      {
+        "span_y_mm": 300.0,
+        "profile_path": "C:\\Users\\kaiez\\grbl-Mega-5X\\hotwire-sender\\resources\\airfoils\\0168_CLARK X.dat",
+        "profile_name": "CLARK X",
+        "chord_mm": 140.0,
+        "twist_deg": 0.0,
+        "offset_x_mm": 0.0,
+        "offset_y_mm": 0.0,
+        "kerf_mm": 0.0
+      }
+    ]
+  },
+  "geometry": {
+    "wire_span": 1000.0,
+    "block_root_x": 150.0,
+    "block_tip_x": 850.0
+  },
+  "cut_params": {
+    "feed": 600.0,
+    "hot_wire_s": 500,
+    "leadin_mm": 20.0,
+    "leadout_mm": 20.0,
+    "n_resample": 500,
+    "safe_y": 80.0,
+    "mode": "single"
+  },
+  "notes": ""
+}
