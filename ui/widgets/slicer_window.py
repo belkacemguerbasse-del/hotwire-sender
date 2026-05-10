@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QSlider,
     QSpinBox,
     QSplitter,
     QVBoxLayout,
@@ -352,15 +353,52 @@ class SlicerWindow(QDialog):
         fc.addRow("Y sécurité retour :", self.sb_safe_y)
         fc.addRow("Mode de génération :", self.cb_mode)
 
-        # ---- Aperçu ----
+        # ---- Aperçu principal ----
         self.plot = pg.PlotWidget()
         self.plot.setBackground("w")
         self.plot.showGrid(x=True, y=True, alpha=0.3)
         self.plot.setAspectLocked(True)
         self.plot.setLabel("bottom", "X (mm)")
         self.plot.setLabel("left", "Y (mm)")
-        self._section_curves: list = []   # courbes de profils transformés
-        self._panel_curves: list = []     # paires (curve_left, curve_right) par panneau
+        self._section_curves: list = []
+        self._panel_curves: list = []
+
+        # ---- Vue de coupe interpolée (slider d'envergure) ----
+        gb_slice = QGroupBox("Vue de coupe à une position d'envergure")
+        self.plot_slice = pg.PlotWidget()
+        self.plot_slice.setBackground("w")
+        self.plot_slice.showGrid(x=True, y=True, alpha=0.3)
+        self.plot_slice.setAspectLocked(True)
+        self.plot_slice.setLabel("bottom", "X (mm)")
+        self.plot_slice.setLabel("left", "Y (mm)")
+        self._slice_curve = self.plot_slice.plot(
+            [], [], pen=pg.mkPen("#7950f2", width=2)
+        )
+
+        self.sl_span = QSlider(Qt.Horizontal)
+        self.sl_span.setRange(0, 1000)  # promille de l'envergure
+        self.sl_span.setValue(500)
+        self.sl_span.valueChanged.connect(self._update_slice_preview)
+
+        self.lbl_slice_pos = QLabel("Y = — mm")
+        self.lbl_slice_pos.setFont(QFont("Consolas", 10, QFont.Bold))
+        self.lbl_slice_pos.setMinimumWidth(110)
+        self.lbl_slice_pos.setStyleSheet("color: #7950f2;")
+
+        self.lbl_slice_meta = QLabel("—")
+        self.lbl_slice_meta.setStyleSheet("color: #637381; font-style: italic;")
+
+        slider_row = QHBoxLayout()
+        slider_row.addWidget(QLabel("Envergure :"))
+        slider_row.addWidget(self.sl_span, 1)
+        slider_row.addWidget(self.lbl_slice_pos)
+
+        v_slice = QVBoxLayout(gb_slice)
+        v_slice.addLayout(slider_row)
+        v_slice.addWidget(self.plot_slice, 1)
+        v_slice.addWidget(self.lbl_slice_meta)
+        gb_slice.setMinimumWidth(360)
+        gb_slice.setMaximumWidth(440)
 
         # ---- Boutons d'action ----
         self.btn_preview = QPushButton("Rafraîchir l'aperçu")
@@ -388,10 +426,17 @@ class SlicerWindow(QDialog):
         actions.addWidget(self.btn_load_in_app)
         actions.addWidget(self.btn_close)
 
+        # Aperçu principal + vue de coupe côte à côte (splitter)
+        preview_split = QSplitter(Qt.Horizontal)
+        preview_split.addWidget(self.plot)
+        preview_split.addWidget(gb_slice)
+        preview_split.setStretchFactor(0, 2)
+        preview_split.setStretchFactor(1, 1)
+
         outer = QVBoxLayout(self)
         outer.addWidget(gb_sections)
         outer.addLayout(mid)
-        outer.addWidget(self.plot, 1)
+        outer.addWidget(preview_split, 1)
         outer.addLayout(actions)
 
         # Initialise avec 2 sections (compat v1)
@@ -567,6 +612,44 @@ class SlicerWindow(QDialog):
         except Exception:
             pass
         self.plot.autoRange()
+
+        # Refresh la vue de coupe interpolée pour rester synchro
+        self._update_slice_preview()
+
+    def _update_slice_preview(self) -> None:
+        """Calcule et affiche le profil interpolé à la position d'envergure
+        définie par le slider."""
+        wing = self._build_wing()
+        if wing is None or wing.n_sections < 2:
+            self._slice_curve.setData([], [])
+            self.lbl_slice_pos.setText("Y = — mm")
+            self.lbl_slice_meta.setText("Charger les profils des sections pour activer la vue de coupe.")
+            return
+        total = wing.total_span_mm
+        if total <= 0:
+            self._slice_curve.setData([], [])
+            self.lbl_slice_pos.setText("Y = 0 mm")
+            return
+        ratio = self.sl_span.value() / 1000.0
+        y = total * ratio
+        sec = wing.section_at_span(y, n_points=200)
+        if sec is None:
+            self._slice_curve.setData([], [])
+            return
+        prof = sec.transformed()
+        if prof is None:
+            self._slice_curve.setData([], [])
+            return
+        xs = [p[0] for p in prof.points]
+        ys = [p[1] for p in prof.points]
+        self._slice_curve.setData(xs, ys)
+        self.plot_slice.autoRange()
+        self.lbl_slice_pos.setText(f"Y = {y:.0f} mm")
+        self.lbl_slice_meta.setText(
+            f"Section interpolée : corde {sec.chord_mm:.1f} mm · "
+            f"twist {sec.twist_deg:+.2f}° · "
+            f"offset (X={sec.offset_x_mm:+.1f}, Y={sec.offset_y_mm:+.1f})"
+        )
 
     # ---------- Génération G-code ----------
 
