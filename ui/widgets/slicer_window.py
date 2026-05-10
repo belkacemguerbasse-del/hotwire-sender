@@ -40,6 +40,9 @@ from PySide6.QtWidgets import (
 
 from core import persistence
 from gcode.profiles import load_profile, resample
+from gcode.project import (
+    CutGeometryDict, CutParamsDict, HotWireProject, PROJECT_EXTENSION,
+)
 from gcode.slicer import CutGeometry, CutParams, generate_gcode_wing, project
 from gcode.wing import Section, WingDefinition
 
@@ -401,11 +404,25 @@ class SlicerWindow(QDialog):
         gb_slice.setMaximumWidth(440)
 
         # ---- Boutons d'action ----
+        self.btn_open_project = QPushButton("📂  Ouvrir projet…")
+        self.btn_save_project = QPushButton("💾  Sauver projet…")
+        self.btn_open_project.setToolTip(
+            "Ouvre un fichier .hwproj : restaure toutes les sections, "
+            "la géométrie machine et les paramètres de coupe."
+        )
+        self.btn_save_project.setToolTip(
+            "Sauve l'état complet du slicer dans un fichier .hwproj. "
+            "Pratique pour découper l'aile miroir avec exactement le même setup."
+        )
+        self.btn_open_project.clicked.connect(self._open_project)
+        self.btn_save_project.clicked.connect(self._save_project)
+
         self.btn_preview = QPushButton("Rafraîchir l'aperçu")
         self.btn_save = QPushButton("Générer & sauver…")
         self.btn_load_in_app = QPushButton("Générer & charger dans l'app")
         self.btn_close = QPushButton("Fermer")
-        for b in (self.btn_preview, self.btn_save, self.btn_load_in_app, self.btn_close):
+        for b in (self.btn_open_project, self.btn_save_project, self.btn_preview,
+                  self.btn_save, self.btn_load_in_app, self.btn_close):
             b.setMinimumHeight(34)
         self.btn_save.setProperty("variant", "primary")
         self.btn_load_in_app.setProperty("variant", "primary")
@@ -420,6 +437,9 @@ class SlicerWindow(QDialog):
         mid.addWidget(gb_cut, 1)
 
         actions = QHBoxLayout()
+        actions.addWidget(self.btn_open_project)
+        actions.addWidget(self.btn_save_project)
+        actions.addSpacing(20)
         actions.addWidget(self.btn_preview)
         actions.addStretch(1)
         actions.addWidget(self.btn_save)
@@ -746,6 +766,97 @@ class SlicerWindow(QDialog):
         else:
             self.gcode_generated.emit(result)
         self.close()
+
+    # ---------- Projet .hwproj ----------
+
+    def _current_project(self) -> HotWireProject:
+        wing = WingDefinition(sections=[p.to_section() for p in self._sections])
+        return HotWireProject(
+            wing=wing,
+            geometry=CutGeometryDict(
+                wire_span=self.sb_wire_span.value(),
+                block_root_x=self.sb_block_root.value(),
+                block_tip_x=self.sb_block_tip.value(),
+            ),
+            cut_params=CutParamsDict(
+                feed=self.sb_feed.value(),
+                hot_wire_s=self.sb_s.value(),
+                leadin_mm=self.sb_leadin.value(),
+                leadout_mm=self.sb_leadout.value(),
+                n_resample=self.sb_n.value(),
+                safe_y=self.sb_safe_y.value(),
+                mode=self.cb_mode.currentData() or "single",
+            ),
+        )
+
+    def _save_project(self) -> None:
+        project = self._current_project()
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Sauver le projet", f"projet{PROJECT_EXTENSION}",
+            f"Projet HotWire (*{PROJECT_EXTENSION});;Tous (*)",
+        )
+        if not path:
+            return
+        if not path.lower().endswith(PROJECT_EXTENSION):
+            path += PROJECT_EXTENSION
+        try:
+            project.save(path)
+        except OSError as e:
+            QMessageBox.critical(self, "Erreur", f"Écriture impossible : {e}")
+            return
+        QMessageBox.information(self, "Projet sauvé", f"Sauvegardé dans :\n{path}")
+
+    def _open_project(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Ouvrir un projet", "",
+            f"Projet HotWire (*{PROJECT_EXTENSION});;Tous (*)",
+        )
+        if not path:
+            return
+        try:
+            project = HotWireProject.load(path)
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur",
+                                 f"Lecture impossible : {e}")
+            return
+        self._apply_project(project)
+        QMessageBox.information(
+            self, "Projet ouvert",
+            f"{project.wing.n_sections} section(s) chargées depuis :\n{path}",
+        )
+
+    def _apply_project(self, project: HotWireProject) -> None:
+        """Applique un projet ouvert à la fenêtre slicer."""
+        # Reset des sections
+        while self._sections:
+            p = self._sections.pop()
+            self._sections_layout.removeWidget(p)
+            p.setParent(None)
+            p.deleteLater()
+        # Recrée les sections du projet
+        for s in project.wing.sections[:MAX_SECTIONS]:
+            self._add_section(emit_change=False)
+            panel = self._sections[-1]
+            panel.from_section(s)
+        # Si moins de MIN_SECTIONS, complète
+        while len(self._sections) < MIN_SECTIONS:
+            self._add_section(emit_change=False)
+        # Géométrie
+        self.sb_wire_span.setValue(project.geometry.wire_span)
+        self.sb_block_root.setValue(project.geometry.block_root_x)
+        self.sb_block_tip.setValue(project.geometry.block_tip_x)
+        # Paramètres coupe
+        self.sb_feed.setValue(project.cut_params.feed)
+        self.sb_s.setValue(project.cut_params.hot_wire_s)
+        self.sb_leadin.setValue(project.cut_params.leadin_mm)
+        self.sb_leadout.setValue(project.cut_params.leadout_mm)
+        self.sb_n.setValue(project.cut_params.n_resample)
+        self.sb_safe_y.setValue(project.cut_params.safe_y)
+        idx = self.cb_mode.findData(project.cut_params.mode)
+        if idx >= 0:
+            self.cb_mode.setCurrentIndex(idx)
+        self._update_section_indices()
+        self._update_preview()
 
     # ---------- Persistance via WingDefinition JSON ----------
 
