@@ -82,6 +82,8 @@ class JobRunner(QObject):
         self._pump()
 
     def stop(self) -> None:
+        """Stop demandé par l'utilisateur : arrête le runner ET soft-reset
+        le firmware (Ctrl-X) pour repartir d'un état propre."""
         self._running = False
         self._paused = False
         self._pending_pause_msg = None
@@ -89,6 +91,19 @@ class JobRunner(QObject):
         self._tick.stop()
         self.link.soft_reset()
         self._t0 = None
+        self.finished.emit()
+
+    def abort(self) -> None:
+        """Stop net du runner SANS toucher au firmware. À utiliser quand le
+        firmware est déjà en Alarm (inutile de soft-reset, ça écraserait
+        l'état utile)."""
+        self._running = False
+        self._paused = False
+        self._pending_pause_msg = None
+        self._pending_pause_idx = -1
+        self._tick.stop()
+        self._t0 = None
+        self.finished.emit()
 
     def is_running(self) -> bool:
         return self._running

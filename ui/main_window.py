@@ -213,6 +213,8 @@ class MainWindow(QMainWindow):
         self.link.status_received.connect(self.state.update_from_status)
         # Watchdog : timestamp à chaque status reçu
         self.link.status_received.connect(self._on_status_for_watchdog)
+        # Stop auto du job si on entre en Alarm
+        self.state.state_changed.connect(self._on_state_changed_safety)
         self.state.state_changed.connect(self.header.on_state)
         self.state.mpos_changed.connect(self.dro.set_mpos)
         self.state.wpos_changed.connect(self.dro.set_wpos)
@@ -305,6 +307,24 @@ class MainWindow(QMainWindow):
         self.link.set_boot_delay_s(prefs["boot_delay_s"])
         self.status.append_info("Préférences appliquées.")
 
+    def _on_state_changed_safety(self, state: str) -> None:
+        """Si la machine entre en Alarm pendant un job, on stoppe net.
+        Évite la cascade d'errors quand le firmware refuse toutes les
+        commandes suivantes."""
+        if state != "Alarm":
+            return
+        if not self.job.is_running():
+            return
+        self.link.stop_streaming()
+        self.hotwire.force_off()
+        self.job.abort()
+        msg = (
+            "ALARME firmware détectée — fil coupé, job stoppé. "
+            "Vérifie la cause (limite, probe, etc.), Débloq pour libérer."
+        )
+        self.status.append_info(msg)
+        self.statusBar().showMessage(msg, 0)
+
     def _on_status_for_watchdog(self, _status) -> None:
         import time
         self._last_status_ts = time.monotonic()
@@ -345,14 +365,31 @@ class MainWindow(QMainWindow):
         self.header.on_state("Alarm")
 
     def _on_line_for_error_pause(self, line: str) -> None:
-        """Pause auto du job si une erreur Grbl arrive pendant l'exécution."""
+        """Stop auto du job si une erreur Grbl arrive pendant l'exécution.
+
+        On NE peut PAS juste pauser le runner : la file interne de GrblLink
+        peut contenir des centaines de lignes qui vont continuer à partir
+        et générer une cascade d'errors. On vide donc la file d'envoi
+        immédiatement et on stoppe net (sans soft-reset car le firmware
+        est probablement déjà en alarme et il garde un état utile)."""
         if not self._pause_on_error:
             return
         if not self.job.is_running():
             return
         if line.startswith("error:") or line.lower().startswith("alarm"):
-            self.job.pause()
-            self.status.append_info(f"Job en pause : {line}")
+            # 1. Coupe la cascade : vide la file link
+            self.link.stop_streaming()
+            # 2. Coupe le fil chaud par sécurité
+            self.hotwire.force_off()
+            # 3. Stop net du runner (sans toucher firmware)
+            self.job.abort()
+            msg = (
+                f"STOP AUTO sur {line} — fil coupé, file vidée. "
+                "Vérifie la cause, clique Débloq pour libérer l'alarme, "
+                "puis relance."
+            )
+            self.status.append_info(msg)
+            self.statusBar().showMessage(msg, 0)
 
     def _on_job_pause(self, message: str) -> None:
         """Affiché quand le runner rencontre un `; @HW_PAUSE:` (entre panneaux

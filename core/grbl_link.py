@@ -252,6 +252,14 @@ class GrblLink(QObject):
                 pass
         self._buffer.clear()
 
+    def stop_streaming(self) -> None:
+        """Vide UNIQUEMENT la file d'envoi vers le firmware sans toucher
+        au port. Utilisé en cas de cascade d'erreurs (firmware en Alarm) :
+        on arrête immédiatement de pousser des lignes qui seraient toutes
+        rejetées, mais on continue à recevoir les status reports."""
+        self._queue.clear()
+        self._pending.clear()
+
     def soft_reset(self) -> None:
         self.send_realtime(CMD_RESET)
         self.reset_streamer()
