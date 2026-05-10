@@ -22,11 +22,14 @@ from __future__ import annotations
 import math
 
 import numpy as np
-from PySide6.QtCore import Qt, Slot
+from PySide6.QtCore import Qt, Signal, Slot
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QComboBox,
+    QFrame,
     QHBoxLayout,
     QLabel,
+    QProgressBar,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -96,6 +99,11 @@ _VIEW_PRESETS = {
 class PathView3D(QWidget):
     """Vue 3D avec toolbar de navigation. Si OpenGL indisponible, message à la place."""
 
+    sim_play_requested = Signal()
+    sim_pause_requested = Signal()
+    sim_stop_requested = Signal()
+    sim_speed_changed = Signal(float)
+
     def __init__(self, wire_span_default: float = 1000.0, parent: QWidget | None = None):
         super().__init__(parent)
         self._wire_span = wire_span_default
@@ -103,6 +111,8 @@ class PathView3D(QWidget):
         self._show_sweep = True
         self._show_wire = True
         self._loaded_extents: tuple[float, float, float, float, float, float] | None = None
+        # Mode simulation : quand True, ignore les `on_mpos` venant du firmware
+        self._sim_mode = False
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -129,6 +139,9 @@ class PathView3D(QWidget):
         self._view.setBackgroundColor((24, 26, 32))
         self._view.setCameraPosition(distance=1500, elevation=28, azimuth=-55)
         outer.addWidget(self._view, 1)
+
+        # ---- Barre de simulation (en bas) ----
+        outer.addWidget(self._build_sim_toolbar())
 
         # ---- Items 3D ----
         # Grille au sol (plan XY, Z=0)
@@ -264,6 +277,120 @@ class PathView3D(QWidget):
         h.addWidget(self.lbl_info)
         return bar
 
+    def _build_sim_toolbar(self) -> QWidget:
+        """Barre de simulation en bas du panneau 3D."""
+        bar = QFrame()
+        bar.setStyleSheet(
+            "QFrame { background-color: #1e2230; border-top: 1px solid #2c3142; }"
+            "QLabel { color: #c8d0dd; }"
+        )
+        bar.setFixedHeight(48)
+        h = QHBoxLayout(bar)
+        h.setContentsMargins(10, 6, 10, 6)
+        h.setSpacing(8)
+
+        lbl = QLabel("🎬 Simulation :")
+        lbl.setStyleSheet("color: #c8d0dd; font-weight: 600;")
+        h.addWidget(lbl)
+
+        self.btn_sim_play = QPushButton("▶")
+        self.btn_sim_play.setProperty("variant", "primary")
+        self.btn_sim_play.setProperty("compact", True)
+        self.btn_sim_play.setFixedWidth(40)
+        self.btn_sim_play.setMinimumHeight(28)
+        self.btn_sim_play.setToolTip("Démarre / reprend la simulation")
+        self.btn_sim_play.clicked.connect(self.sim_play_requested)
+        h.addWidget(self.btn_sim_play)
+
+        self.btn_sim_pause = QPushButton("⏸")
+        self.btn_sim_pause.setProperty("compact", True)
+        self.btn_sim_pause.setFixedWidth(40)
+        self.btn_sim_pause.setMinimumHeight(28)
+        self.btn_sim_pause.setToolTip("Pause")
+        self.btn_sim_pause.clicked.connect(self.sim_pause_requested)
+        h.addWidget(self.btn_sim_pause)
+
+        self.btn_sim_stop = QPushButton("⏹")
+        self.btn_sim_stop.setProperty("compact", True)
+        self.btn_sim_stop.setFixedWidth(40)
+        self.btn_sim_stop.setMinimumHeight(28)
+        self.btn_sim_stop.setToolTip("Stop / retour au début")
+        self.btn_sim_stop.clicked.connect(self.sim_stop_requested)
+        h.addWidget(self.btn_sim_stop)
+
+        h.addWidget(QLabel("Vitesse :"))
+        self.cb_sim_speed = QComboBox()
+        for label, val in (("1×", 1.0), ("5×", 5.0), ("10×", 10.0),
+                           ("50×", 50.0), ("100×", 100.0), ("Max", 1000.0)):
+            self.cb_sim_speed.addItem(label, val)
+        self.cb_sim_speed.setCurrentIndex(1)  # 5×
+        self.cb_sim_speed.setMinimumWidth(70)
+        self.cb_sim_speed.currentIndexChanged.connect(
+            lambda _i: self.sim_speed_changed.emit(self.cb_sim_speed.currentData())
+        )
+        h.addWidget(self.cb_sim_speed)
+
+        self.sim_progress = QProgressBar()
+        self.sim_progress.setRange(0, 1000)
+        self.sim_progress.setValue(0)
+        self.sim_progress.setTextVisible(False)
+        self.sim_progress.setMinimumWidth(180)
+        h.addWidget(self.sim_progress, 1)
+
+        self.lbl_sim_time = QLabel("00:00 / 00:00")
+        self.lbl_sim_time.setStyleSheet(
+            "color: #c8d0dd; font-family: Consolas, monospace; font-weight: 600;"
+        )
+        h.addWidget(self.lbl_sim_time)
+
+        self.lbl_sim_state = QLabel("Aucun programme")
+        self.lbl_sim_state.setStyleSheet("color: #8a93a3; font-style: italic;")
+        h.addWidget(self.lbl_sim_state)
+
+        return bar
+
+    # ---------- API simulation ----------
+
+    @Slot(tuple)
+    def on_sim_position(self, pos: tuple) -> None:
+        """Position fournie par le simulateur (X, Y, Z, A en mm)."""
+        if self._view is None or len(pos) < 4:
+            return
+        x, y, z, a = pos[0], pos[1], pos[2], pos[3]
+        self._wire.setData(
+            pos=np.array(
+                [[x, 0.0, y], [a, self._wire_span, z]],
+                dtype=np.float32,
+            ),
+        )
+
+    @Slot(float)
+    def on_sim_progress(self, pct: float) -> None:
+        self.sim_progress.setValue(int(pct * 10))
+
+    @Slot(float, float)
+    def on_sim_elapsed(self, elapsed_s: float, total_s: float) -> None:
+        def fmt(s: float) -> str:
+            s = int(s)
+            return f"{s // 60:02d}:{s % 60:02d}"
+        self.lbl_sim_time.setText(f"{fmt(elapsed_s)} / {fmt(total_s)}")
+
+    @Slot(str)
+    def on_sim_state(self, state: str) -> None:
+        labels = {
+            "idle": ("Prêt", "#8a93a3"),
+            "playing": ("En cours", "#1f9d55"),
+            "paused": ("Pause", "#f59f00"),
+            "finished": ("Terminé", "#1f6feb"),
+        }
+        text, color = labels.get(state, ("?", "#8a93a3"))
+        self.lbl_sim_state.setText(text)
+        self.lbl_sim_state.setStyleSheet(f"color: {color}; font-weight: 600;")
+        self._sim_mode = (state == "playing" or state == "paused")
+        # En sim mode on cache la wire firmware pour éviter conflits
+        if state == "idle":
+            self._sim_mode = False
+
     def _toggle_visibility(self, attr: str, checked: bool) -> None:
         setattr(self, attr, checked)
         # Refresh
@@ -386,6 +513,10 @@ class PathView3D(QWidget):
     @Slot(tuple)
     def on_mpos(self, mpos: tuple) -> None:
         if self._view is None or len(mpos) < 4:
+            return
+        # En mode simulation, on ignore le firmware pour ne pas écraser
+        # la position simulée.
+        if self._sim_mode:
             return
         x, y, z, a = mpos[0], mpos[1], mpos[2], mpos[3]
         self._wire.setData(

@@ -20,6 +20,7 @@ from core import persistence
 from core.grbl_link import GrblLink, GrblStatus
 from core.job_runner import JobRunner
 from core.machine_state import MachineState
+from core.simulator import GcodeSimulator
 from gcode.parser import parse_program
 from ui.theme import card_shadow
 from ui.widgets.preferences_panel import load_prefs
@@ -55,6 +56,7 @@ class MainWindow(QMainWindow):
         )
         self.state = MachineState(axis_count=4, axis_names=("X", "Y", "Z", "A"))
         self.job = JobRunner(self.link, self)
+        self.simulator = GcodeSimulator(self)
 
         # ---- Widgets ----
         self.header = HeaderBar()
@@ -237,6 +239,19 @@ class MainWindow(QMainWindow):
         self.gcode.pause_requested.connect(self._on_pause)
         self.gcode.stop_requested.connect(self._on_stop)
         self.gcode.reload_requested.connect(self._on_reload)
+        self.gcode.simulate_requested.connect(self._on_simulate)
+
+        # Simulation : positions du simulateur -> vue 3D
+        self.simulator.position_updated.connect(self.path_3d.on_sim_position)
+        self.simulator.progress_changed.connect(self.path_3d.on_sim_progress)
+        self.simulator.elapsed_changed.connect(self.path_3d.on_sim_elapsed)
+        self.simulator.state_changed.connect(self.path_3d.on_sim_state)
+
+        # Boutons de la barre de simulation -> simulator
+        self.path_3d.sim_play_requested.connect(self.simulator.play)
+        self.path_3d.sim_pause_requested.connect(self.simulator.pause)
+        self.path_3d.sim_stop_requested.connect(self.simulator.stop)
+        self.path_3d.sim_speed_changed.connect(self.simulator.set_speed)
 
         self.job.line_sent.connect(lambda i: self.gcode.mark_line(i, "→"))
         self.job.line_acked.connect(
@@ -388,9 +403,14 @@ class MainWindow(QMainWindow):
             self.hotwire,
             self.overrides,
             self.mdi,
-            self.gcode,
         ):
             w.setEnabled(connected)
+        # Le panneau GCode reste utilisable même hors connexion :
+        # `Ouvrir`, `Simuler`, `Recharger` n'ont pas besoin du firmware.
+        # Seuls `Lancer` / `Pause` / `Stop` requièrent une machine connectée.
+        self.gcode.setEnabled(True)
+        for b in (self.gcode.btn_play, self.gcode.btn_pause, self.gcode.btn_stop):
+            b.setEnabled(connected)
 
     def _on_jog_axis(self, axis: str, distance: float, feed: float) -> None:
         cmd = f"$J=G91 G21 {axis}{distance:.3f} F{int(feed)}"
@@ -419,6 +439,32 @@ class MainWindow(QMainWindow):
 
     def _on_hotwire_power(self, value: int) -> None:
         self.link.send_line(f"S{value}")
+
+    def _on_simulate(self) -> None:
+        """Lance la simulation du G-code chargé dans la vue 3D."""
+        from PySide6.QtWidgets import QMessageBox, QTabWidget
+
+        lines = self.gcode.lines()
+        if not lines:
+            QMessageBox.information(
+                self, "Simulation",
+                "Aucun programme chargé. Ouvre un fichier G-code ou génère "
+                "un programme via le slicer avant de simuler."
+            )
+            return
+
+        # Bascule sur l'onglet Vue 3D
+        tabs = self.findChild(QTabWidget)
+        if tabs is not None:
+            for i in range(tabs.count()):
+                if tabs.tabText(i).strip().lower().startswith("vue 3d"):
+                    tabs.setCurrentIndex(i)
+                    break
+
+        self.simulator.load(lines)
+        self.simulator.set_speed(self.path_3d.cb_sim_speed.currentData() or 5.0)
+        self.simulator.play()
+        self.statusBar().showMessage("Simulation en cours…")
 
     def _on_gcode_loaded(self, path: str, lines: list) -> None:
         self.statusBar().showMessage(f"{path} chargé ({len(lines)} lignes)")

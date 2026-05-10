@@ -22,6 +22,7 @@ class Move:
     line_no: int
     rapid: bool
     pos: dict[str, float]
+    feed: float = 0.0  # mm/min, valeur F modale courante (ignorée si rapid=True)
 
 
 @dataclass
@@ -52,6 +53,7 @@ def parse_program(text: str) -> ParseResult:
     cur = {"X": 0.0, "Y": 0.0, "Z": 0.0, "A": 0.0}
     absolute = True
     motion = "G0"
+    feed = 0.0  # F modal en mm/min
     moves: list[Move] = []
 
     for i, raw in enumerate(text.splitlines(), start=1):
@@ -61,7 +63,6 @@ def parse_program(text: str) -> ParseResult:
         words = WORD_RE.findall(body)
         if not words:
             continue
-        # First pass: modal updates
         target_words: dict[str, float] = {}
         for letter, value in words:
             L = letter.upper()
@@ -77,6 +78,8 @@ def parse_program(text: str) -> ParseResult:
                     absolute = True
                 elif code == 91:
                     absolute = False
+            elif L == "F":
+                feed = v
             elif L in cur:
                 target_words[L] = v
 
@@ -92,8 +95,14 @@ def parse_program(text: str) -> ParseResult:
                 new_pos[L] = cur[L] + v
 
         if new_pos != cur:
+            is_rapid = (motion == "G0")
             moves.append(
-                Move(line_no=i, rapid=(motion == "G0"), pos=dict(new_pos))
+                Move(
+                    line_no=i,
+                    rapid=is_rapid,
+                    pos=dict(new_pos),
+                    feed=0.0 if is_rapid else feed,
+                )
             )
             cur = new_pos
 

@@ -24,25 +24,33 @@ class GcodePanel(QGroupBox):
     pause_requested = Signal()
     stop_requested = Signal()
     reload_requested = Signal()
+    simulate_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__("GCode", parent)
 
         self.btn_open = QPushButton("Ouvrir…")
+        self.btn_simulate = QPushButton("🎬  Simuler")
         self.btn_play = QPushButton("▶  Lancer")
         self.btn_pause = QPushButton("⏸  Pause")
         self.btn_stop = QPushButton("⏹  Stop")
         self.btn_reload = QPushButton("↻  Recharger")
         self.btn_open.setToolTip("Ouvrir un fichier G-code (.nc, .gcode, .tap, .ngc)")
-        self.btn_play.setToolTip("Lancer / reprendre l'exécution")
+        self.btn_simulate.setToolTip(
+            "Lance une simulation visuelle dans la vue 3D, sans envoyer "
+            "au firmware. Vérifie la trajectoire avant la vraie coupe."
+        )
+        self.btn_play.setToolTip("Lancer / reprendre l'exécution sur la machine")
         self.btn_pause.setToolTip("Mettre en pause (feed hold)")
         self.btn_stop.setToolTip("Arrêter et réinitialiser")
         self.btn_reload.setToolTip("Recharger le fichier depuis le disque")
         self.btn_play.setProperty("variant", "primary")
-        for b in (self.btn_open, self.btn_play, self.btn_pause, self.btn_stop, self.btn_reload):
+        for b in (self.btn_open, self.btn_simulate, self.btn_play,
+                  self.btn_pause, self.btn_stop, self.btn_reload):
             b.setMinimumHeight(30)
 
         self.btn_open.clicked.connect(self._open)
+        self.btn_simulate.clicked.connect(self.simulate_requested)
         self.btn_play.clicked.connect(self.play_requested)
         self.btn_pause.clicked.connect(self.pause_requested)
         self.btn_stop.clicked.connect(self.stop_requested)
@@ -54,6 +62,7 @@ class GcodePanel(QGroupBox):
 
         top = QHBoxLayout()
         top.addWidget(self.btn_open)
+        top.addWidget(self.btn_simulate)
         top.addWidget(self.btn_play)
         top.addWidget(self.btn_pause)
         top.addWidget(self.btn_stop)
