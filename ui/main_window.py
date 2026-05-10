@@ -567,21 +567,47 @@ class MainWindow(QMainWindow):
         self.job.load(lines)
 
     def _on_play(self) -> None:
+        # FEEDBACK IMMÉDIAT : on bloque le bouton et on affiche un message
+        # avant de faire quoi que ce soit. Le travail lourd est défèré via
+        # QTimer.singleShot(0) pour que l'UI ait le temps de se rafraîchir.
         if not self.link.is_open():
             self.status.append_info("Pas de connexion : impossible de démarrer.")
             return
-        if not self.job._lines:
+        if not self.job._lines and not self.gcode.lines():
             self.status.append_info("Aucun programme chargé.")
             return
-        self.gcode.reset_marks()
-        self.job.load(self.gcode.lines())
-        # Reset le timestamp du watchdog : on ne veut pas qu'il déclenche
-        # immédiatement parce que le dernier status date de quelques secondes
-        # (cas typique : utilisateur idle puis clique Lancer).
+        # Désactive temporairement le bouton et donne du feedback visuel
+        self.gcode.btn_play.setEnabled(False)
+        self.statusBar().showMessage("Démarrage…")
+        # Defer le travail au prochain tick de l'event loop pour que
+        # l'UI se peigne immédiatement (sans attendre le pump).
+        from PySide6.QtCore import QTimer as _QT
+        _QT.singleShot(0, self._do_play)
+
+    def _do_play(self) -> None:
+        """Travail effectif du démarrage, exécuté après que l'UI a eu le
+        temps de répondre au clic."""
         import time
+        t0 = time.monotonic()
+        self.gcode.reset_marks()
+        t1 = time.monotonic()
+        self.job.load(self.gcode.lines())
+        t2 = time.monotonic()
+        # Reset le timestamp du watchdog
         self._last_status_ts = time.monotonic()
         self._watchdog_triggered = False
         self.job.start()
+        t3 = time.monotonic()
+        # Logging diag : si l'une des étapes dépasse 100ms on l'affiche
+        total_ms = (t3 - t0) * 1000
+        if total_ms > 100:
+            self.status.append_info(
+                f"_do_play : reset={ (t1-t0)*1000:.0f}ms "
+                f"load={(t2-t1)*1000:.0f}ms start={(t3-t2)*1000:.0f}ms "
+                f"total={total_ms:.0f}ms"
+            )
+        self.statusBar().showMessage("En cours…")
+        self.gcode.btn_play.setEnabled(True)
 
     def _on_pause(self) -> None:
         self.job.pause()

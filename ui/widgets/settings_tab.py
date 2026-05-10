@@ -120,7 +120,10 @@ class _SettingsTable(QWidget):
                 self.table.setItem(row, 4, desc)
 
                 self._row_by_id[sid] = row
-                self._sort_by_id()
+                # NOTE : on N'APPELLE PAS _sort_by_id() ici. Grbl envoie
+                # déjà les settings dans l'ordre via $$, donc l'insertion
+                # à la fin produit l'ordre correct. Trier à chaque insert
+                # serait O(N²), soit ~500ms de freeze pour 30+ settings.
             else:
                 self.table.item(row, 1).setText(value)
         finally:
