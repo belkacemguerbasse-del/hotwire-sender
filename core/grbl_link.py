@@ -365,18 +365,33 @@ class GrblLink(QObject):
         self.line_received.emit(line)
 
     def _try_send(self) -> None:
+        """Vide la file vers le firmware en batchant un maximum de lignes
+        en une seule écriture serial pour éviter les coûts par-write
+        (~5-10 ms chacun sur Windows). Respecte toujours le buffer RX du
+        firmware (~255 octets sur grbl-Mega-5X)."""
         if self._ser is None or not self._is_open:
             return
+        # Construction du batch de lignes qui tiennent dans le buffer RX
+        batch = bytearray()
+        sent_lines: list[str] = []
+        used = sum(self._pending)
         while self._queue:
             nxt = self._queue[0] + "\n"
-            used = sum(self._pending)
-            if used + len(nxt) > self._rx_buffer_size:
-                return
-            try:
-                self._ser.write(nxt.encode("ascii", errors="ignore"))
-            except serial.SerialException as e:
-                self.error_text.emit(f"Écriture échouée: {e}")
-                return
-            self._pending.append(len(nxt))
-            self._queue.popleft()
-            self.sent.emit(nxt.rstrip())
+            nxt_len = len(nxt)
+            if used + nxt_len > self._rx_buffer_size:
+                break
+            batch.extend(nxt.encode("ascii", errors="ignore"))
+            self._pending.append(nxt_len)
+            sent_lines.append(self._queue.popleft())
+            used += nxt_len
+        if not batch:
+            return
+        # Une SEULE écriture serial pour tout le batch
+        try:
+            self._ser.write(bytes(batch))
+        except serial.SerialException as e:
+            self.error_text.emit(f"Écriture échouée: {e}")
+            return
+        # Émet `sent` après pour ne pas bloquer dans la boucle
+        for line in sent_lines:
+            self.sent.emit(line)

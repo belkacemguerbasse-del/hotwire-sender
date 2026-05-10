@@ -91,8 +91,14 @@ class GcodePanel(QGroupBox):
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.horizontalHeader().setStretchLastSection(True)
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        # IMPORTANT : col 0 (statut) en Fixed, pas ResizeToContents.
+        # ResizeToContents recalcule la largeur sur TOUTES les lignes à
+        # chaque modification de cellule → O(N²) pour reset_marks et
+        # mark_line. Pour 1000 lignes = ~2.2 s de freeze.
+        h = self.table.horizontalHeader()
+        h.setSectionResizeMode(0, QHeaderView.Fixed)
+        self.table.setColumnWidth(0, 44)
+        h.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.table.setStyleSheet("QTableWidget { font-family: Consolas; font-size: 11px; }")
 
         v = QVBoxLayout(self)
