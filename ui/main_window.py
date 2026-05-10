@@ -50,6 +50,10 @@ class MainWindow(QMainWindow):
 
         prefs = load_prefs()
         self._pause_on_error = prefs["pause_on_error"]
+        self._watchdog_enabled = prefs["watchdog"]
+        self._watchdog_threshold_s = prefs["watchdog_s"]
+        self._last_status_ts: float = 0.0
+        self._watchdog_triggered: bool = False
         self.link = GrblLink(
             status_period_ms=prefs["poll_ms"],
             boot_delay_s=prefs["boot_delay_s"],
@@ -57,6 +61,13 @@ class MainWindow(QMainWindow):
         self.state = MachineState(axis_count=4, axis_names=("X", "Y", "Z", "A"))
         self.job = JobRunner(self.link, self)
         self.simulator = GcodeSimulator(self)
+
+        # Watchdog : tick toutes les 500 ms pour vérifier l'activité
+        from PySide6.QtCore import QTimer as _QT
+        self._watchdog_timer = _QT(self)
+        self._watchdog_timer.setInterval(500)
+        self._watchdog_timer.timeout.connect(self._watchdog_tick)
+        self._watchdog_timer.start()
 
         # ---- Widgets ----
         self.header = HeaderBar()
@@ -200,6 +211,8 @@ class MainWindow(QMainWindow):
 
         # État machine
         self.link.status_received.connect(self.state.update_from_status)
+        # Watchdog : timestamp à chaque status reçu
+        self.link.status_received.connect(self._on_status_for_watchdog)
         self.state.state_changed.connect(self.header.on_state)
         self.state.mpos_changed.connect(self.dro.set_mpos)
         self.state.wpos_changed.connect(self.dro.set_wpos)
@@ -286,9 +299,50 @@ class MainWindow(QMainWindow):
     def _on_prefs_applied(self, prefs: dict) -> None:
         """Appelé quand l'utilisateur clique « Appliquer » sur les préférences."""
         self._pause_on_error = prefs["pause_on_error"]
+        self._watchdog_enabled = prefs["watchdog"]
+        self._watchdog_threshold_s = prefs["watchdog_s"]
         self.link.set_status_period_ms(prefs["poll_ms"])
         self.link.set_boot_delay_s(prefs["boot_delay_s"])
         self.status.append_info("Préférences appliquées.")
+
+    def _on_status_for_watchdog(self, _status) -> None:
+        import time
+        self._last_status_ts = time.monotonic()
+        if self._watchdog_triggered:
+            # Le firmware reparle : on désarme l'alerte visuelle
+            self._watchdog_triggered = False
+            self.statusBar().showMessage("Connexion firmware rétablie")
+
+    def _watchdog_tick(self) -> None:
+        """Vérifie l'activité firmware. Coupe le fil + pause si inactif trop
+        longtemps pendant qu'un job tourne."""
+        if not self._watchdog_enabled:
+            return
+        if not self.link.is_open():
+            return
+        if not self.job.is_running():
+            return
+        if self._watchdog_triggered:
+            return
+        if self._last_status_ts == 0.0:
+            return
+        import time
+        delta = time.monotonic() - self._last_status_ts
+        if delta < self._watchdog_threshold_s:
+            return
+        # ALERTE
+        self._watchdog_triggered = True
+        self.hotwire.force_off()
+        self.job.pause()
+        msg = (
+            f"⚠ WATCHDOG : aucun status report depuis {delta:.1f} s. "
+            "Fil coupé, job en pause. Vérifie le câble USB et le firmware."
+        )
+        self.status.append_info(msg)
+        self.statusBar().showMessage(msg)
+        # Affiche aussi un popup non bloquant
+        from PySide6.QtWidgets import QMessageBox
+        QMessageBox.warning(self, "Watchdog déclenché", msg)
 
     def _on_line_for_error_pause(self, line: str) -> None:
         """Pause auto du job si une erreur Grbl arrive pendant l'exécution."""

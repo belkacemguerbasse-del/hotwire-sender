@@ -64,9 +64,27 @@ class PreferencesPanel(QGroupBox):
             "Mega céder la main à Grbl. 3 s = recommandé pour stk500v2."
         )
 
+        self.cb_watchdog = QCheckBox("Watchdog de sécurité")
+        self.cb_watchdog.setToolTip(
+            "Si aucun status report n'arrive pendant le délai ci-dessous "
+            "alors qu'un job est en cours, coupe le fil chaud + met en pause "
+            "et alerte. Protection contre câble débranché ou freeze firmware."
+        )
+        self.sb_watchdog_s = QDoubleSpinBox()
+        self.sb_watchdog_s.setRange(1.0, 30.0)
+        self.sb_watchdog_s.setSingleStep(0.5)
+        self.sb_watchdog_s.setDecimals(1)
+        self.sb_watchdog_s.setSuffix(" s")
+        self.sb_watchdog_s.setToolTip(
+            "Délai sans status report avant déclenchement. "
+            "3 s = recommandé (status normal toutes les 200 ms)."
+        )
+
         form = QFormLayout()
         form.addRow(self.cb_autoconnect)
         form.addRow(self.cb_pause_on_error)
+        form.addRow(self.cb_watchdog)
+        form.addRow("Délai watchdog :", self.sb_watchdog_s)
         form.addRow("Intervalle status :", self.sb_poll_ms)
         form.addRow("Silence bootloader :", self.sb_boot_delay)
 
@@ -88,6 +106,8 @@ class PreferencesPanel(QGroupBox):
     def _load(self) -> None:
         self.cb_autoconnect.setChecked(persistence.get_bool("prefs/autoconnect", False))
         self.cb_pause_on_error.setChecked(persistence.get_bool("prefs/pause_on_error", True))
+        self.cb_watchdog.setChecked(persistence.get_bool("prefs/watchdog", True))
+        self.sb_watchdog_s.setValue(persistence.get_float("prefs/watchdog_s", 3.0))
         self.sb_poll_ms.setValue(persistence.get_int("prefs/poll_ms", 200))
         self.sb_boot_delay.setValue(persistence.get_float("prefs/boot_delay_s", 3.0))
 
@@ -95,6 +115,8 @@ class PreferencesPanel(QGroupBox):
         prefs = self.get_prefs()
         persistence.set_("prefs/autoconnect", prefs["autoconnect"])
         persistence.set_("prefs/pause_on_error", prefs["pause_on_error"])
+        persistence.set_("prefs/watchdog", prefs["watchdog"])
+        persistence.set_("prefs/watchdog_s", prefs["watchdog_s"])
         persistence.set_("prefs/poll_ms", prefs["poll_ms"])
         persistence.set_("prefs/boot_delay_s", prefs["boot_delay_s"])
         self.settings_applied.emit(prefs)
@@ -103,6 +125,8 @@ class PreferencesPanel(QGroupBox):
         return {
             "autoconnect": self.cb_autoconnect.isChecked(),
             "pause_on_error": self.cb_pause_on_error.isChecked(),
+            "watchdog": self.cb_watchdog.isChecked(),
+            "watchdog_s": self.sb_watchdog_s.value(),
             "poll_ms": self.sb_poll_ms.value(),
             "boot_delay_s": self.sb_boot_delay.value(),
         }
@@ -113,6 +137,8 @@ def load_prefs() -> dict:
     return {
         "autoconnect": persistence.get_bool("prefs/autoconnect", False),
         "pause_on_error": persistence.get_bool("prefs/pause_on_error", True),
+        "watchdog": persistence.get_bool("prefs/watchdog", True),
+        "watchdog_s": persistence.get_float("prefs/watchdog_s", 3.0),
         "poll_ms": persistence.get_int("prefs/poll_ms", 200),
         "boot_delay_s": persistence.get_float("prefs/boot_delay_s", 3.0),
     }
