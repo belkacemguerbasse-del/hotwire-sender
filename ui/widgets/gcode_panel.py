@@ -39,6 +39,7 @@ class GcodePanel(QGroupBox):
     stop_requested = Signal()
     reload_requested = Signal()
     simulate_requested = Signal()
+    history_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__("GCode", parent)
@@ -49,6 +50,11 @@ class GcodePanel(QGroupBox):
         self.btn_pause = QPushButton("⏸  Pause")
         self.btn_stop = QPushButton("⏹  Stop")
         self.btn_reload = QPushButton("↻  Recharger")
+        self.btn_history = QPushButton("📋  Historique")
+        self.btn_history.setToolTip(
+            "Ouvre l'historique des programmes lancés : "
+            "date, durée, état, lignes, et ré-import en 1 clic."
+        )
         self.btn_open.setToolTip("Ouvrir un fichier G-code (.nc, .gcode, .tap, .ngc)")
         self.btn_simulate.setToolTip(
             "Lance une simulation visuelle dans la vue 3D, sans envoyer "
@@ -60,7 +66,7 @@ class GcodePanel(QGroupBox):
         self.btn_reload.setToolTip("Recharger le fichier depuis le disque")
         self.btn_play.setProperty("variant", "primary")
         for b in (self.btn_open, self.btn_simulate, self.btn_play,
-                  self.btn_pause, self.btn_stop, self.btn_reload):
+                  self.btn_pause, self.btn_stop, self.btn_reload, self.btn_history):
             b.setMinimumHeight(30)
 
         self.btn_open.clicked.connect(self._open)
@@ -69,6 +75,7 @@ class GcodePanel(QGroupBox):
         self.btn_pause.clicked.connect(self.pause_requested)
         self.btn_stop.clicked.connect(self.stop_requested)
         self.btn_reload.clicked.connect(self.reload_requested)
+        self.btn_history.clicked.connect(self.history_requested)
 
         self.lbl_progress = QLabel("0 de 0")
         self.lbl_elapsed = QLabel("00:00:00")
@@ -87,6 +94,7 @@ class GcodePanel(QGroupBox):
         top.addWidget(self.btn_pause)
         top.addWidget(self.btn_stop)
         top.addWidget(self.btn_reload)
+        top.addWidget(self.btn_history)
         top.addStretch(1)
 
         info = QHBoxLayout()

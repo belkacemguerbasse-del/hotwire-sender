@@ -11,6 +11,8 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QSplitter,
     QStatusBar,
+    QStyle,
+    QSystemTrayIcon,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -18,7 +20,9 @@ from PySide6.QtWidgets import (
 
 from core import persistence
 from core.grbl_link import GrblLink, GrblStatus
+from core.job_history import JobHistory, make_entry
 from core.job_runner import JobRunner
+from core.macros import MacroStore
 from core.machine_state import MachineState
 from core.simulator import GcodeSimulator
 from gcode.parser import estimate_program, parse_program
@@ -61,6 +65,25 @@ class MainWindow(QMainWindow):
         self.state = MachineState(axis_count=4, axis_names=("X", "Y", "Z", "A"))
         self.job = JobRunner(self.link, self)
         self.simulator = GcodeSimulator(self)
+        self.history = JobHistory(parent=self)
+        self.macros_store = MacroStore(parent=self)
+
+        # System tray icon pour les notifications (Windows toast / Linux notify)
+        self.tray_icon = QSystemTrayIcon(self)
+        try:
+            self.tray_icon.setIcon(
+                self.style().standardIcon(QStyle.SP_ComputerIcon)
+            )
+        except Exception:
+            pass
+        self.tray_icon.setToolTip("HotWire Sender")
+        if QSystemTrayIcon.isSystemTrayAvailable():
+            self.tray_icon.show()
+        # Tracking du job courant pour créer une HistoryEntry à la fin
+        self._current_job_started_at = None
+        self._current_job_path = ""
+        self._current_job_lines = 0
+        self._pending_finish_status = "ok"  # majoré par stop/abort handlers
 
         # Watchdog : tick toutes les 500 ms pour vérifier l'activité
         from PySide6.QtCore import QTimer as _QT
@@ -176,11 +199,10 @@ class MainWindow(QMainWindow):
         return self.settings
 
     def _build_macros_tab(self) -> QWidget:
-        w = QWidget()
-        v = QVBoxLayout(w)
-        v.addWidget(QLabel("Macros utilisateur — à implémenter en P2."))
-        v.addStretch(1)
-        return w
+        from ui.widgets.macros_tab import MacrosTab
+        self.macros = MacrosTab(self.macros_store)
+        self.macros.send_lines_requested.connect(self._on_macro_run)
+        return self.macros
 
     # ---------- Signal wiring ----------
 
@@ -264,6 +286,7 @@ class MainWindow(QMainWindow):
         self.gcode.stop_requested.connect(self._on_stop)
         self.gcode.reload_requested.connect(self._on_reload)
         self.gcode.simulate_requested.connect(self._on_simulate)
+        self.gcode.history_requested.connect(self._on_history)
 
         # Simulation : positions du simulateur -> vue 3D
         self.simulator.position_updated.connect(self.path_3d.on_sim_position)
@@ -302,6 +325,7 @@ class MainWindow(QMainWindow):
             self.link.soft_reset()
         self.status.append_info("ARRÊT D'URGENCE déclenché")
         if self.job.is_running():
+            self._pending_finish_status = "aborted"
             self.job.stop()
 
     def _toggle_camera(self) -> None:
@@ -312,6 +336,41 @@ class MainWindow(QMainWindow):
         from ui.widgets.cheat_sheet import CheatSheetDialog
         dlg = CheatSheetDialog(self)
         dlg.exec()
+
+    def _on_history(self) -> None:
+        """Ouvre le dialog d'historique des coupes."""
+        from ui.widgets.history_dialog import HistoryDialog
+        dlg = HistoryDialog(self.history, self)
+        dlg.reload_requested.connect(self._on_history_reload)
+        dlg.exec()
+
+    def _on_history_reload(self, path: str) -> None:
+        """Recharge un fichier sélectionné depuis l'historique."""
+        if path and path != "<slicer>":
+            self.gcode.load_file(path)
+
+    def _on_macro_run(self, lines: list) -> None:
+        """Envoie les lignes d'une macro au firmware, une par une."""
+        if not self.link.is_open():
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self, "Pas de connexion",
+                "Connecte-toi au firmware avant d'exécuter une macro."
+            )
+            return
+        if self.job.is_running():
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self, "Job en cours",
+                "Un programme est en cours d'exécution. Stop avant d'exécuter "
+                "une macro pour éviter les interférences."
+            )
+            return
+        for line in lines:
+            line = line.strip()
+            if line:
+                self.link.send_line(line)
+        self.status.append_info(f"Macro envoyée ({len(lines)} lignes).")
 
     def _on_prefs_applied(self, prefs: dict) -> None:
         """Appelé quand l'utilisateur clique « Appliquer » sur les préférences."""
@@ -330,6 +389,7 @@ class MainWindow(QMainWindow):
             return
         if not self.job.is_running():
             return
+        self._pending_finish_status = "aborted"
         self.link.stop_streaming()
         self.hotwire.force_off()
         self.job.abort()
@@ -397,6 +457,7 @@ class MainWindow(QMainWindow):
             # 2. Coupe le fil chaud par sécurité
             self.hotwire.force_off()
             # 3. Stop net du runner (sans toucher firmware)
+            self._pending_finish_status = "error"
             self.job.abort()
             msg = (
                 f"STOP AUTO sur {line} — fil coupé, file vidée. "
@@ -415,6 +476,44 @@ class MainWindow(QMainWindow):
         self.gcode.btn_pause.setEnabled(False)  # rien à pauser
         # Efface le surlignage de la ligne courante
         self.gcode.clear_active_highlight()
+        # Enregistre dans l'historique si on avait un job actif
+        if self._current_job_started_at is not None:
+            import time
+            duration = time.monotonic() - self._current_job_started_mono
+            entry = make_entry(
+                started_at=self._current_job_started_at,
+                duration_s=duration,
+                file_path=self._current_job_path,
+                lines_count=self._current_job_lines,
+                status=self._pending_finish_status,
+            )
+            self.history.add(entry)
+            # Notification Windows / système
+            self._notify_job_end(entry)
+            self._current_job_started_at = None
+
+    def _notify_job_end(self, entry) -> None:
+        """Affiche une notification système après fin de job (Windows toast)."""
+        if not (QSystemTrayIcon.isSystemTrayAvailable()
+                and self.tray_icon.supportsMessages()):
+            return
+        from ui.widgets.history_dialog import _fmt_duration, STATUS_COLORS
+        _, status_label = STATUS_COLORS.get(
+            entry.status, ("#637381", entry.status.upper())
+        )
+        icon = {
+            "ok":      QSystemTrayIcon.Information,
+            "stopped": QSystemTrayIcon.Information,
+            "aborted": QSystemTrayIcon.Warning,
+            "error":   QSystemTrayIcon.Critical,
+        }.get(entry.status, QSystemTrayIcon.Information)
+        title = f"HotWire Sender — {status_label}"
+        body = (
+            f"Programme : {entry.file_name}\n"
+            f"Durée : {_fmt_duration(entry.duration_s)}\n"
+            f"Lignes : {entry.lines_count}"
+        )
+        self.tray_icon.showMessage(title, body, icon, 6000)
 
     def _on_job_pause(self, message: str) -> None:
         """Affiché quand le runner rencontre un `; @HW_PAUSE:` (entre panneaux
@@ -628,6 +727,7 @@ class MainWindow(QMainWindow):
         """Travail effectif du démarrage, exécuté après que l'UI a eu le
         temps de répondre au clic."""
         import time
+        from datetime import datetime
         t0 = time.monotonic()
         self.gcode.reset_marks()
         t1 = time.monotonic()
@@ -636,6 +736,12 @@ class MainWindow(QMainWindow):
         # Reset le timestamp du watchdog
         self._last_status_ts = time.monotonic()
         self._watchdog_triggered = False
+        # Tracking pour l'historique
+        self._current_job_started_at = datetime.now()
+        self._current_job_started_mono = time.monotonic()
+        self._current_job_path = self.gcode._current_path or ""
+        self._current_job_lines = len(self.gcode.lines())
+        self._pending_finish_status = "ok"
         self.job.start()
         t3 = time.monotonic()
         # Logging diag : si l'une des étapes dépasse 100ms on l'affiche
@@ -659,6 +765,7 @@ class MainWindow(QMainWindow):
 
     def _on_stop(self) -> None:
         self.hotwire.force_off()
+        self._pending_finish_status = "stopped"
         self.job.stop()
         # job.stop() emet finished -> _on_job_finished re-active btn_play
 
