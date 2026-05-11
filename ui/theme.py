@@ -196,6 +196,20 @@ QPushButton:checked:hover {{
     );
 }}
 
+/* === Disabled : ECRASE les gradients colores pour griser correctement ===
+   Sans cette regle, [variant="primary"]:disabled reste bleu car le selecteur
+   d'attribut a plus de specificite que :disabled. */
+QPushButton[variant="primary"]:disabled,
+QPushButton[variant="danger"]:disabled,
+QPushButton[variant="success"]:disabled,
+QPushButton[variant="warning"]:disabled,
+QPushButton:checked:disabled {{
+    background-color: {c['surface_alt']};
+    color: {c['text_subtle']};
+    border: 1px solid {c['border']};
+    font-weight: 500;
+}}
+
 /* === Action principale (bleu) === */
 /* Triple stop pour un highlight glossy en haut. */
 QPushButton[variant="primary"] {{

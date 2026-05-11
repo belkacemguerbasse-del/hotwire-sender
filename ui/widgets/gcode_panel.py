@@ -175,7 +175,12 @@ class GcodePanel(QGroupBox):
     @Slot(int, str)
     def mark_line(self, idx_zero_based: int, status: str) -> None:
         """Marque la ligne avec un statut. La maj du label et du scroll sont
-        throttlées à 10 Hz pour ne pas bloquer l'UI lors d'un streaming rapide."""
+        throttlées à 10 Hz pour ne pas bloquer l'UI lors d'un streaming rapide.
+
+        Cas spécial : sur le tout 1er mark_line après reset (aucune ligne
+        surlignée), on fait un refresh IMMÉDIAT pour que le surlignage
+        apparaisse à la première ligne plutôt que sauter au n°30+ après
+        100ms de throttle (pendant lesquels le pump avale les commentaires)."""
         if idx_zero_based < 0 or idx_zero_based >= self.table.rowCount():
             return
         item = self.table.item(idx_zero_based, 0)
@@ -184,9 +189,12 @@ class GcodePanel(QGroupBox):
             self.table.setItem(idx_zero_based, 0, item)
         else:
             item.setText(status)
-        # Mémorise l'index le plus récent pour le rafraîchissement throttlé
         self._pending_idx = idx_zero_based
-        if not self._refresh_timer.isActive():
+        if self._highlighted_row < 0:
+            # Tout 1er mark après reset : refresh tout de suite pour que
+            # l'utilisateur voie le surlignage commencer au début.
+            self._do_refresh()
+        elif not self._refresh_timer.isActive():
             self._refresh_timer.start()
 
     def _do_refresh(self) -> None:

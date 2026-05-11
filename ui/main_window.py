@@ -395,7 +395,9 @@ class MainWindow(QMainWindow):
         """Appelé via job.finished — fin normale, stop manuel, ou abort."""
         self.statusBar().showMessage("Programme terminé", 5000)
         # Réactive btn_play uniquement si on est toujours connecté
-        self.gcode.btn_play.setEnabled(self.link.is_open())
+        connected = self.link.is_open()
+        self.gcode.btn_play.setEnabled(connected)
+        self.gcode.btn_pause.setEnabled(False)  # rien à pauser
         # Efface le surlignage de la ligne courante
         self.gcode.clear_active_highlight()
 
@@ -508,8 +510,14 @@ class MainWindow(QMainWindow):
         # `Ouvrir`, `Simuler`, `Recharger` n'ont pas besoin du firmware.
         # Seuls `Lancer` / `Pause` / `Stop` requièrent une machine connectée.
         self.gcode.setEnabled(True)
-        for b in (self.gcode.btn_play, self.gcode.btn_pause, self.gcode.btn_stop):
-            b.setEnabled(connected)
+        # btn_play : actif si connecté (sera désactivé pendant l'exécution)
+        self.gcode.btn_play.setEnabled(connected)
+        # btn_stop : actif si connecté (no-op si pas de job, mais clean)
+        self.gcode.btn_stop.setEnabled(connected)
+        # btn_pause : actif uniquement quand un job tourne (géré par _on_play)
+        # Ici on désactive par défaut, _on_play l'active quand le job démarre.
+        if not (self.job.is_running() and not self.job._paused):
+            self.gcode.btn_pause.setEnabled(False)
 
     def _on_jog_axis(self, axis: str, distance: float, feed: float) -> None:
         cmd = f"$J=G91 G21 {axis}{distance:.3f} F{int(feed)}"
@@ -575,20 +583,28 @@ class MainWindow(QMainWindow):
         self.job.load(lines)
 
     def _on_play(self) -> None:
-        # FEEDBACK IMMÉDIAT : on bloque le bouton et on affiche un message
-        # avant de faire quoi que ce soit. Le travail lourd est défèré via
-        # QTimer.singleShot(0) pour que l'UI ait le temps de se rafraîchir.
         if not self.link.is_open():
             self.status.append_info("Pas de connexion : impossible de démarrer.")
             return
+        # Cas 1 : reprise depuis une pause manuelle utilisateur.
+        # Le job est encore "running" mais "paused" → on un-pause sans
+        # toucher au cursor, et on envoie cycle_start au firmware.
+        if self.job.is_running() and self.job._paused:
+            self.gcode.btn_play.setEnabled(False)
+            self.gcode.btn_pause.setEnabled(True)
+            self.statusBar().showMessage("Reprise…")
+            self.job.resume()
+            return
+        # Cas 2 : démarrage depuis zéro
         if not self.job._lines and not self.gcode.lines():
             self.status.append_info("Aucun programme chargé.")
             return
-        # Désactive temporairement le bouton et donne du feedback visuel
-        self.gcode.btn_play.setEnabled(False)
-        self.statusBar().showMessage("Démarrage…")
+        # Désactive temporairement le bouton et donne du feedback visuel.
         # Defer le travail au prochain tick de l'event loop pour que
         # l'UI se peigne immédiatement (sans attendre le pump).
+        self.gcode.btn_play.setEnabled(False)
+        self.gcode.btn_pause.setEnabled(True)
+        self.statusBar().showMessage("Démarrage…")
         from PySide6.QtCore import QTimer as _QT
         _QT.singleShot(0, self._do_play)
 
@@ -620,10 +636,15 @@ class MainWindow(QMainWindow):
 
     def _on_pause(self) -> None:
         self.job.pause()
+        # Pause = autorise la reprise via btn_play
+        self.gcode.btn_play.setEnabled(True)
+        self.gcode.btn_pause.setEnabled(False)
+        self.statusBar().showMessage("En pause — clique Lancer pour reprendre")
 
     def _on_stop(self) -> None:
         self.hotwire.force_off()
         self.job.stop()
+        # job.stop() emet finished -> _on_job_finished re-active btn_play
 
     def _on_reload(self) -> None:
         if self.gcode._current_path:
