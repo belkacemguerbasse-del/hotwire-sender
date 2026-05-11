@@ -379,6 +379,21 @@ class MainWindow(QMainWindow):
         self._watchdog_threshold_s = prefs["watchdog_s"]
         self.link.set_status_period_ms(prefs["poll_ms"])
         self.link.set_boot_delay_s(prefs["boot_delay_s"])
+        # Hot-swap du thème (clair / sombre)
+        from PySide6.QtWidgets import QApplication
+        from ui.theme import apply_theme, current_mode
+        new_theme = prefs.get("theme", "light")
+        if new_theme != current_mode():
+            apply_theme(QApplication.instance(), mode=new_theme)
+        # Langue : nécessite restart
+        from ui.i18n import current_language
+        if prefs.get("language", "fr") != current_language():
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(
+                self, "Langue",
+                "Le changement de langue prendra effet au prochain "
+                "redémarrage de l'application."
+            )
         self.status.append_info("Préférences appliquées.")
 
     def _on_state_changed_safety(self, state: str) -> None:

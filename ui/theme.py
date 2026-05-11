@@ -14,26 +14,22 @@ from PySide6.QtGui import QColor, QFont, QFontDatabase
 from PySide6.QtWidgets import QApplication, QGraphicsDropShadowEffect, QWidget
 
 
-COLORS = {
-    # Fond / surfaces
-    "bg":           "#f3f5f8",   # fond global
-    "surface":      "#ffffff",   # cartes, group boxes, tables
-    "surface_alt":  "#fafbfc",   # zones secondaires
-    "border":       "#d6dde6",   # bordures fines
-    "border_strong":"#aab3bf",   # bordures contrastées
-    # Texte
+COLORS_LIGHT = {
+    "bg":           "#f3f5f8",
+    "surface":      "#ffffff",
+    "surface_alt":  "#fafbfc",
+    "border":       "#d6dde6",
+    "border_strong":"#aab3bf",
     "text":         "#1f2933",
     "text_muted":   "#637381",
     "text_subtle":  "#9aa3ad",
-    # Marque / accents
-    "primary":      "#1f6feb",   # action principale
+    "primary":      "#1f6feb",
     "primary_hi":   "#388bfd",
     "primary_lo":   "#0d52c2",
-    "danger":       "#d6363d",   # arrêt d'urgence, erreurs
+    "danger":       "#d6363d",
     "danger_hi":    "#e85460",
-    "warning":      "#f59f00",   # hold, override actif
-    "success":      "#1f9d55",   # idle / opérationnel
-    # États machine (Grbl)
+    "warning":      "#f59f00",
+    "success":      "#1f9d55",
     "state_idle":   "#1f9d55",
     "state_run":    "#1f6feb",
     "state_hold":   "#f59f00",
@@ -45,6 +41,54 @@ COLORS = {
     "state_sleep":  "#868e96",
     "state_unknown":"#adb5bd",
 }
+
+COLORS_DARK = {
+    "bg":           "#1a1d2b",
+    "surface":      "#252938",
+    "surface_alt":  "#2c3142",
+    "border":       "#3d4452",
+    "border_strong":"#5c6275",
+    "text":         "#e2e6ed",
+    "text_muted":   "#8a93a3",
+    "text_subtle":  "#5c6275",
+    "primary":      "#388bfd",
+    "primary_hi":   "#5fa8ff",
+    "primary_lo":   "#1f6feb",
+    "danger":       "#e85460",
+    "danger_hi":    "#ff7a85",
+    "warning":      "#f5b85a",
+    "success":      "#3acf76",
+    "state_idle":   "#3acf76",
+    "state_run":    "#388bfd",
+    "state_hold":   "#f5b85a",
+    "state_alarm":  "#e85460",
+    "state_jog":    "#a585ff",
+    "state_door":   "#ffc94d",
+    "state_check":  "#ffc94d",
+    "state_home":   "#a585ff",
+    "state_sleep":  "#9aa3ad",
+    "state_unknown":"#5c6275",
+}
+
+# Palette active (mute par set_theme). On commence en clair.
+COLORS = dict(COLORS_LIGHT)
+
+# Mode actif (light/dark) pour les widgets qui ont besoin de le savoir
+_CURRENT_MODE = "light"
+
+
+def current_mode() -> str:
+    return _CURRENT_MODE
+
+
+def set_palette(mode: str) -> None:
+    """Bascule la palette active (light/dark). N'applique PAS le QSS —
+    appeler apply_theme() ensuite."""
+    global _CURRENT_MODE
+    src = COLORS_DARK if mode == "dark" else COLORS_LIGHT
+    COLORS.clear()
+    COLORS.update(src)
+    _CURRENT_MODE = "dark" if mode == "dark" else "light"
 
 
 # Noms de fonte qu'on essaie en cascade. Segoe UI = défaut Windows 11.
@@ -676,7 +720,11 @@ QProgressBar::chunk {{
 """
 
 
-def apply_theme(app: QApplication) -> None:
+def apply_theme(app: QApplication, mode: str | None = None) -> None:
+    """Applique le thème à l'application. Si `mode` est fourni (light/dark),
+    bascule la palette avant. Peut être appelé à chaud pour switcher."""
+    if mode is not None:
+        set_palette(mode)
     app.setFont(ui_font(10))
     app.setStyleSheet(stylesheet())
 

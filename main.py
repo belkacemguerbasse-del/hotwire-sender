@@ -21,7 +21,15 @@ def main() -> int:
     app.setApplicationName("HotWire Sender")
     app.setOrganizationName("HotWire")
     app.setStyle("Fusion")           # base neutre + cohérente avec QSS
-    apply_theme(app)
+
+    # Charge la pref de thème AVANT d'appliquer (sinon flash visuel)
+    from core import persistence
+    from ui.i18n import set_language
+    theme_mode = persistence.get_str("prefs/theme", "light")
+    lang = persistence.get_str("prefs/language", "fr")
+    set_language(lang)
+    apply_theme(app, mode=theme_mode)
+
     win = MainWindow()
     win.show()
     return app.exec()

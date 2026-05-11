@@ -12,6 +12,7 @@ from __future__ import annotations
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -64,6 +65,23 @@ class PreferencesPanel(QGroupBox):
             "Mega céder la main à Grbl. 3 s = recommandé pour stk500v2."
         )
 
+        # --- Apparence ---
+        self.cb_theme = QComboBox()
+        self.cb_theme.addItem("Clair", "light")
+        self.cb_theme.addItem("Sombre", "dark")
+        self.cb_theme.setToolTip(
+            "Bascule l'apparence générale de l'application.\n"
+            "Le changement est appliqué immédiatement."
+        )
+
+        self.cb_lang = QComboBox()
+        self.cb_lang.addItem("Français", "fr")
+        self.cb_lang.addItem("English", "en")
+        self.cb_lang.setToolTip(
+            "Langue de l'interface. Le changement prend effet "
+            "au prochain redémarrage de l'application."
+        )
+
         self.cb_watchdog = QCheckBox("Watchdog de sécurité")
         self.cb_watchdog.setToolTip(
             "Si aucun status report n'arrive pendant le délai ci-dessous "
@@ -87,6 +105,8 @@ class PreferencesPanel(QGroupBox):
         form.addRow("Délai watchdog :", self.sb_watchdog_s)
         form.addRow("Intervalle status :", self.sb_poll_ms)
         form.addRow("Silence bootloader :", self.sb_boot_delay)
+        form.addRow("Thème :", self.cb_theme)
+        form.addRow("Langue :", self.cb_lang)
 
         self.btn_apply = QPushButton("Appliquer")
         self.btn_apply.setProperty("variant", "primary")
@@ -110,6 +130,14 @@ class PreferencesPanel(QGroupBox):
         self.sb_watchdog_s.setValue(persistence.get_float("prefs/watchdog_s", 3.0))
         self.sb_poll_ms.setValue(persistence.get_int("prefs/poll_ms", 200))
         self.sb_boot_delay.setValue(persistence.get_float("prefs/boot_delay_s", 3.0))
+        theme = persistence.get_str("prefs/theme", "light")
+        idx = self.cb_theme.findData(theme)
+        if idx >= 0:
+            self.cb_theme.setCurrentIndex(idx)
+        lang = persistence.get_str("prefs/language", "fr")
+        idx = self.cb_lang.findData(lang)
+        if idx >= 0:
+            self.cb_lang.setCurrentIndex(idx)
 
     def _apply(self) -> None:
         prefs = self.get_prefs()
@@ -119,6 +147,8 @@ class PreferencesPanel(QGroupBox):
         persistence.set_("prefs/watchdog_s", prefs["watchdog_s"])
         persistence.set_("prefs/poll_ms", prefs["poll_ms"])
         persistence.set_("prefs/boot_delay_s", prefs["boot_delay_s"])
+        persistence.set_("prefs/theme", prefs["theme"])
+        persistence.set_("prefs/language", prefs["language"])
         self.settings_applied.emit(prefs)
 
     def get_prefs(self) -> dict:
@@ -129,6 +159,8 @@ class PreferencesPanel(QGroupBox):
             "watchdog_s": self.sb_watchdog_s.value(),
             "poll_ms": self.sb_poll_ms.value(),
             "boot_delay_s": self.sb_boot_delay.value(),
+            "theme": self.cb_theme.currentData() or "light",
+            "language": self.cb_lang.currentData() or "fr",
         }
 
 
@@ -141,4 +173,6 @@ def load_prefs() -> dict:
         "watchdog_s": persistence.get_float("prefs/watchdog_s", 3.0),
         "poll_ms": persistence.get_int("prefs/poll_ms", 200),
         "boot_delay_s": persistence.get_float("prefs/boot_delay_s", 3.0),
+        "theme": persistence.get_str("prefs/theme", "light"),
+        "language": persistence.get_str("prefs/language", "fr"),
     }
