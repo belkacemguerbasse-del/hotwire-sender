@@ -273,7 +273,7 @@ class MainWindow(QMainWindow):
             lambda i, ok: self.gcode.mark_line(i, "ok" if ok else "err")
         )
         self.job.elapsed_tick.connect(self.gcode.set_elapsed)
-        self.job.finished.connect(lambda: self.statusBar().showMessage("Programme terminé"))
+        self.job.finished.connect(self._on_job_finished)
         self.job.pause_with_message.connect(self._on_job_pause)
 
     # ---------- Slots ----------
@@ -390,6 +390,14 @@ class MainWindow(QMainWindow):
             )
             self.status.append_info(msg)
             self.statusBar().showMessage(msg, 0)
+
+    def _on_job_finished(self) -> None:
+        """Appelé via job.finished — fin normale, stop manuel, ou abort."""
+        self.statusBar().showMessage("Programme terminé", 5000)
+        # Réactive btn_play uniquement si on est toujours connecté
+        self.gcode.btn_play.setEnabled(self.link.is_open())
+        # Efface le surlignage de la ligne courante
+        self.gcode.clear_active_highlight()
 
     def _on_job_pause(self, message: str) -> None:
         """Affiché quand le runner rencontre un `; @HW_PAUSE:` (entre panneaux
@@ -607,7 +615,8 @@ class MainWindow(QMainWindow):
                 f"total={total_ms:.0f}ms"
             )
         self.statusBar().showMessage("En cours…")
-        self.gcode.btn_play.setEnabled(True)
+        # btn_play RESTE grisé tant que le job tourne. Re-activé via
+        # _on_job_finished (job.finished.emit lorsque stop/abort/finish).
 
     def _on_pause(self) -> None:
         self.job.pause()

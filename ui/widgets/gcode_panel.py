@@ -12,7 +12,7 @@ Optimisations clés :
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, QTimer, Signal, Slot
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QBrush, QColor, QFont
 from PySide6.QtWidgets import (
     QFileDialog,
     QGroupBox,
@@ -25,6 +25,11 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+
+# Brush utilisé pour surligner la ligne courante en exécution
+_HIGHLIGHT_BRUSH = QBrush(QColor("#cfe1ff"))   # bleu clair (cohérent avec thème)
+_DEFAULT_BRUSH = QBrush()  # par défaut Qt = transparent
 
 
 class GcodePanel(QGroupBox):
@@ -113,6 +118,7 @@ class GcodePanel(QGroupBox):
         # ligne envoyée + chaque ack). On accumule les indices et on
         # rafraîchit l'écran à 10 Hz max via ce timer.
         self._pending_idx: int = -1
+        self._highlighted_row: int = -1   # ligne actuellement surlignée
         self._refresh_timer = QTimer(self)
         self._refresh_timer.setInterval(100)  # 10 Hz
         self._refresh_timer.setSingleShot(True)
@@ -158,6 +164,10 @@ class GcodePanel(QGroupBox):
                 self.table.setItem(i, 2, it_gcode)
         finally:
             self.table.setUpdatesEnabled(True)
+        # Reset le surlignage : la nouvelle table n'a aucune ligne active
+        self._highlighted_row = -1
+        self._pending_idx = -1
+        self._refresh_timer.stop()
 
     def lines(self) -> list[str]:
         return list(self._lines)
@@ -180,16 +190,39 @@ class GcodePanel(QGroupBox):
             self._refresh_timer.start()
 
     def _do_refresh(self) -> None:
-        """Effectue le scroll + maj label, appelé à 10 Hz max."""
+        """Effectue le scroll + label + surlignage, appelé à 10 Hz max."""
         if self._pending_idx < 0:
             return
         idx = self._pending_idx
         self._pending_idx = -1
-        if 0 <= idx < self.table.rowCount():
-            self.lbl_progress.setText(f"{idx + 1} de {len(self._lines)}")
-            item = self.table.item(idx, 0)
-            if item is not None:
-                self.table.scrollToItem(item)
+        if not (0 <= idx < self.table.rowCount()):
+            return
+        self.lbl_progress.setText(f"{idx + 1} de {len(self._lines)}")
+        # Déplace le surlignage de l'ancienne ligne vers la nouvelle
+        if self._highlighted_row != idx:
+            if self._highlighted_row >= 0:
+                self._set_row_brush(self._highlighted_row, _DEFAULT_BRUSH)
+            self._set_row_brush(idx, _HIGHLIGHT_BRUSH)
+            self._highlighted_row = idx
+        # Auto-scroll pour garder la ligne visible
+        item = self.table.item(idx, 0)
+        if item is not None:
+            self.table.scrollToItem(item)
+
+    def _set_row_brush(self, row: int, brush: QBrush) -> None:
+        """Applique un fond à toutes les cellules d'une ligne."""
+        if row < 0 or row >= self.table.rowCount():
+            return
+        for col in range(self.table.columnCount()):
+            it = self.table.item(row, col)
+            if it is not None:
+                it.setBackground(brush)
+
+    def clear_active_highlight(self) -> None:
+        """Efface le surlignage de la ligne courante (fin/abort/stop du job)."""
+        if self._highlighted_row >= 0:
+            self._set_row_brush(self._highlighted_row, _DEFAULT_BRUSH)
+            self._highlighted_row = -1
 
     @Slot(str)
     def set_elapsed(self, hms: str) -> None:
@@ -200,9 +233,14 @@ class GcodePanel(QGroupBox):
         pass
 
     def reset_marks(self) -> None:
-        """Efface tous les statuts. Bulk update pour vitesse."""
+        """Efface tous les statuts + le surlignage. Bulk update pour vitesse."""
         self.table.setUpdatesEnabled(False)
         try:
+            # Efface le surlignage avant tout (sinon il reste visible sur
+            # la ligne précédente)
+            if self._highlighted_row >= 0:
+                self._set_row_brush(self._highlighted_row, _DEFAULT_BRUSH)
+                self._highlighted_row = -1
             for row in range(self.table.rowCount()):
                 it = self.table.item(row, 0)
                 if it is not None and it.text():
