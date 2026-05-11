@@ -209,6 +209,11 @@ class MainWindow(QMainWindow):
         self.header.estop_requested.connect(self._on_estop)
         self.header.camera_toggle_requested.connect(self._toggle_camera)
 
+        # Caméra OSD : alimenté en live par les signaux machine
+        if hasattr(self.webcam, "osd"):
+            self.state.state_changed.connect(self.webcam.osd.on_state)
+            self.state.mpos_changed.connect(self.webcam.osd.on_mpos)
+
         # État machine
         self.link.status_received.connect(self.state.update_from_status)
         # Watchdog : timestamp à chaque status reçu
@@ -539,13 +544,19 @@ class MainWindow(QMainWindow):
     def _on_hotwire_on(self, value: int) -> None:
         self.link.send_line(f"M3 S{value}")
         self.hotwire.set_on(True)
+        if hasattr(self.webcam, "osd"):
+            self.webcam.osd.on_hotwire(True, value)
 
     def _on_hotwire_off(self) -> None:
         self.link.send_line("M5")
         self.hotwire.set_on(False)
+        if hasattr(self.webcam, "osd"):
+            self.webcam.osd.on_hotwire(False, 0)
 
     def _on_hotwire_power(self, value: int) -> None:
         self.link.send_line(f"S{value}")
+        if hasattr(self.webcam, "osd"):
+            self.webcam.osd.on_hotwire(True, value)
 
     def _on_simulate(self) -> None:
         """Lance la simulation du G-code chargé dans la vue 3D."""

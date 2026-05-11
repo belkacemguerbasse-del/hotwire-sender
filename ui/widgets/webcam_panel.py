@@ -16,6 +16,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QFileDialog,
     QGroupBox,
@@ -24,6 +25,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSizePolicy,
+    QStackedLayout,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -31,6 +33,8 @@ from PySide6.QtWidgets import (
 
 from core import persistence
 from ui.theme import COLORS, ui_font
+
+from .webcam_osd import WebcamOSD
 
 try:
     from PySide6.QtMultimedia import (
@@ -118,6 +122,17 @@ class WebcamPanel(QWidget):
         self._video = QVideoWidget()
         self._video.setStyleSheet("background-color: black; border-radius: 8px;")
 
+        # OSD overlay au-dessus du video, dans un container avec
+        # QStackedLayout en mode StackAll (les widgets sont empilés
+        # visuellement, le dernier ajouté est au-dessus).
+        self.osd = WebcamOSD()
+        video_container = QWidget()
+        video_layers = QStackedLayout(video_container)
+        video_layers.setStackingMode(QStackedLayout.StackAll)
+        video_layers.addWidget(self._video)   # fond
+        video_layers.addWidget(self.osd)      # overlay au-dessus
+        self._video_container = video_container
+
         self._lbl_no_video = QLabel("Aucune caméra disponible")
         self._lbl_no_video.setAlignment(Qt.AlignCenter)
         self._lbl_no_video.setFont(ui_font(11))
@@ -126,9 +141,15 @@ class WebcamPanel(QWidget):
         )
 
         self._stack.addWidget(self._lbl_no_video)
-        self._stack.addWidget(self._video)
+        self._stack.addWidget(video_container)
         self._stack.setCurrentIndex(0)
         outer.addWidget(self._stack, 1)
+
+        # Toggle OSD on/off
+        self.cb_osd = QCheckBox("Afficher OSD (info sur la vidéo)")
+        self.cb_osd.setChecked(persistence.get_bool("camera/osd_visible", True))
+        self.cb_osd.toggled.connect(self._on_osd_toggle)
+        self.osd.setVisible(self.cb_osd.isChecked())
 
         # --- Actions ---
         self.btn_start_stop = QPushButton("Démarrer")
@@ -145,6 +166,9 @@ class WebcamPanel(QWidget):
         row.addWidget(self.btn_start_stop, 1)
         row.addWidget(self.btn_capture, 1)
         outer.addLayout(row)
+
+        # --- Toggle OSD ---
+        outer.addWidget(self.cb_osd)
 
         # --- Statut ---
         self.lbl_status = QLabel("")
@@ -318,6 +342,11 @@ class WebcamPanel(QWidget):
             color = COLORS["danger"] if error else COLORS["text_muted"]
             self.lbl_status.setStyleSheet(f"color: {color}; font-style: italic;")
             self.lbl_status.setText(msg)
+
+    def _on_osd_toggle(self, checked: bool) -> None:
+        if hasattr(self, "osd"):
+            self.osd.setVisible(checked)
+            persistence.set_("camera/osd_visible", checked)
 
     def shutdown(self) -> None:
         if self._running:
