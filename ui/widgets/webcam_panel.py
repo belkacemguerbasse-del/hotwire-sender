@@ -37,18 +37,57 @@ from ui.theme import COLORS, ui_font
 from .webcam_osd import WebcamOSD
 
 try:
+    from PySide6.QtGui import QPixmap
     from PySide6.QtMultimedia import (
         QCamera,
         QImageCapture,
         QMediaCaptureSession,
         QMediaDevices,
+        QVideoSink,
     )
-    from PySide6.QtMultimediaWidgets import QVideoWidget
     _MM_OK = True
     _MM_ERR = ""
 except Exception as e:  # pragma: no cover
     _MM_OK = False
     _MM_ERR = str(e)
+
+
+class _VideoDisplay(QLabel):
+    """Affichage vidéo via QVideoSink → QImage → QPixmap dans un QLabel.
+
+    On utilise PAS QVideoWidget car il s'appuie sur un native window
+    (DXGI/Media Foundation côté Windows) qui passe SOUS le compositing Qt,
+    ce qui empêche tout overlay Qt (notre OSD) de s'afficher dessus.
+
+    En passant par QVideoSink → QImage on rend dans un QLabel classique,
+    sur lequel l'OSD se compose normalement. Le coût CPU est modeste pour
+    une cam ~640x480 30fps.
+    """
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setAlignment(Qt.AlignCenter)
+        self.setStyleSheet("background-color: black; border-radius: 8px;")
+        self.setMinimumHeight(220)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.video_sink = QVideoSink(self)
+        self.video_sink.videoFrameChanged.connect(self._on_frame)
+
+    def _on_frame(self, frame) -> None:
+        if not frame.isValid():
+            return
+        img = frame.toImage()
+        if img.isNull():
+            return
+        # Convertit en pixmap et adapte à la taille du label en gardant
+        # le ratio d'aspect.
+        pix = QPixmap.fromImage(img)
+        if not pix.isNull():
+            self.setPixmap(pix.scaled(
+                self.size(),
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation,
+            ))
 
 
 class WebcamPanel(QWidget):
@@ -119,8 +158,7 @@ class WebcamPanel(QWidget):
         self._stack.setMinimumHeight(220)
         self._stack.setStyleSheet("background-color: #1a1d22; border-radius: 8px;")
 
-        self._video = QVideoWidget()
-        self._video.setStyleSheet("background-color: black; border-radius: 8px;")
+        self._video = _VideoDisplay()
 
         # OSD overlay au-dessus du video, dans un container avec
         # QStackedLayout en mode StackAll (les widgets sont empilés
@@ -182,7 +220,9 @@ class WebcamPanel(QWidget):
         self._session = QMediaCaptureSession(self)
         self._capture = QImageCapture(self)
         self._session.setImageCapture(self._capture)
-        self._session.setVideoOutput(self._video)
+        # On envoie le flux à notre QVideoSink (intercepte les frames sous
+        # forme de QImage qu'on affiche dans le QLabel _video).
+        self._session.setVideoOutput(self._video.video_sink)
         self._capture.imageSaved.connect(self._on_image_saved)
         self._capture.errorOccurred.connect(
             lambda _id, _err, msg: self._set_status(f"Erreur capture : {msg}", error=True)
