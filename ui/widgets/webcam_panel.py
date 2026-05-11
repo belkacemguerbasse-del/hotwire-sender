@@ -55,13 +55,11 @@ except Exception as e:  # pragma: no cover
 class _VideoDisplay(QLabel):
     """Affichage vidéo via QVideoSink → QImage → QPixmap dans un QLabel.
 
-    On utilise PAS QVideoWidget car il s'appuie sur un native window
-    (DXGI/Media Foundation côté Windows) qui passe SOUS le compositing Qt,
-    ce qui empêche tout overlay Qt (notre OSD) de s'afficher dessus.
-
-    En passant par QVideoSink → QImage on rend dans un QLabel classique,
-    sur lequel l'OSD se compose normalement. Le coût CPU est modeste pour
-    une cam ~640x480 30fps.
+    Pas de QVideoWidget : il s'appuie sur un native window (DXGI/Media
+    Foundation côté Windows) qui passe SOUS le compositing Qt, donc tout
+    overlay Qt (l'OSD) reste invisible. En passant par QVideoSink → QImage
+    on rend dans un QLabel classique, ce qui permet d'avoir un widget enfant
+    (l'OSD) correctement composité par-dessus.
     """
 
     def __init__(self, parent: QWidget | None = None):
@@ -72,6 +70,24 @@ class _VideoDisplay(QLabel):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.video_sink = QVideoSink(self)
         self.video_sink.videoFrameChanged.connect(self._on_frame)
+        self._overlay: QWidget | None = None
+
+    def set_overlay(self, overlay: QWidget) -> None:
+        """Attache un widget d'OSD comme enfant direct, qui sera maintenu
+        à la taille du label par resizeEvent."""
+        overlay.setParent(self)
+        overlay.raise_()  # garantit qu'il est au-dessus
+        overlay.show()
+        self._overlay = overlay
+        self._sync_overlay_geometry()
+
+    def _sync_overlay_geometry(self) -> None:
+        if self._overlay is not None:
+            self._overlay.setGeometry(0, 0, self.width(), self.height())
+
+    def resizeEvent(self, ev) -> None:
+        super().resizeEvent(ev)
+        self._sync_overlay_geometry()
 
     def _on_frame(self, frame) -> None:
         if not frame.isValid():
@@ -79,8 +95,6 @@ class _VideoDisplay(QLabel):
         img = frame.toImage()
         if img.isNull():
             return
-        # Convertit en pixmap et adapte à la taille du label en gardant
-        # le ratio d'aspect.
         pix = QPixmap.fromImage(img)
         if not pix.isNull():
             self.setPixmap(pix.scaled(
@@ -88,6 +102,9 @@ class _VideoDisplay(QLabel):
                 Qt.KeepAspectRatio,
                 Qt.SmoothTransformation,
             ))
+            # Re-raise l'overlay au cas où setPixmap aurait perturbé l'ordre
+            if self._overlay is not None:
+                self._overlay.raise_()
 
 
 class WebcamPanel(QWidget):
@@ -160,16 +177,12 @@ class WebcamPanel(QWidget):
 
         self._video = _VideoDisplay()
 
-        # OSD overlay au-dessus du video, dans un container avec
-        # QStackedLayout en mode StackAll (les widgets sont empilés
-        # visuellement, le dernier ajouté est au-dessus).
+        # OSD : attaché DIRECTEMENT au widget video comme enfant. Le
+        # _VideoDisplay le redimensionne via resizeEvent. Approche bien
+        # plus fiable que QStackedLayout(StackAll) qui depend de
+        # currentIndex pour le z-order.
         self.osd = WebcamOSD()
-        video_container = QWidget()
-        video_layers = QStackedLayout(video_container)
-        video_layers.setStackingMode(QStackedLayout.StackAll)
-        video_layers.addWidget(self._video)   # fond
-        video_layers.addWidget(self.osd)      # overlay au-dessus
-        self._video_container = video_container
+        self._video.set_overlay(self.osd)
 
         self._lbl_no_video = QLabel("Aucune caméra disponible")
         self._lbl_no_video.setAlignment(Qt.AlignCenter)
@@ -179,7 +192,7 @@ class WebcamPanel(QWidget):
         )
 
         self._stack.addWidget(self._lbl_no_video)
-        self._stack.addWidget(video_container)
+        self._stack.addWidget(self._video)
         self._stack.setCurrentIndex(0)
         outer.addWidget(self._stack, 1)
 
