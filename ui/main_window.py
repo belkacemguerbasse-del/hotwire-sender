@@ -21,7 +21,7 @@ from core.grbl_link import GrblLink, GrblStatus
 from core.job_runner import JobRunner
 from core.machine_state import MachineState
 from core.simulator import GcodeSimulator
-from gcode.parser import parse_program
+from gcode.parser import estimate_program, parse_program
 from ui.theme import card_shadow
 from ui.widgets.preferences_panel import load_prefs
 
@@ -168,6 +168,10 @@ class MainWindow(QMainWindow):
         sc = QShortcut(QKeySequence("F9"), self)
         sc.activated.connect(self._toggle_camera)
 
+        # Raccourci F1 pour afficher l'aide-mémoire des raccourcis
+        sc_help = QShortcut(QKeySequence("F1"), self)
+        sc_help.activated.connect(self._show_cheat_sheet)
+
     def _build_settings_tab(self) -> QWidget:
         return self.settings
 
@@ -302,6 +306,12 @@ class MainWindow(QMainWindow):
 
     def _toggle_camera(self) -> None:
         self.dock_camera.setVisible(not self.dock_camera.isVisible())
+
+    def _show_cheat_sheet(self) -> None:
+        """Ouvre le dialog d'aide-mémoire des raccourcis (F1)."""
+        from ui.widgets.cheat_sheet import CheatSheetDialog
+        dlg = CheatSheetDialog(self)
+        dlg.exec()
 
     def _on_prefs_applied(self, prefs: dict) -> None:
         """Appelé quand l'utilisateur clique « Appliquer » sur les préférences."""
@@ -471,25 +481,19 @@ class MainWindow(QMainWindow):
         win.exec()
 
     def _on_slicer_output(self, lines: list) -> None:
-        # Charge le G-code généré directement dans le panneau gcode et la viz.
-        from gcode.parser import parse_program
+        """Charge un G-code généré par le slicer directement dans l'app."""
         text = "\n".join(lines)
         self.gcode._lines = list(lines)
         self.gcode._current_path = "<slicer>"
-        self.gcode.table.setRowCount(0)
-        for i, ln in enumerate(lines, start=1):
-            row = self.gcode.table.rowCount()
-            self.gcode.table.insertRow(row)
-            from PySide6.QtWidgets import QTableWidgetItem
-            self.gcode.table.setItem(row, 0, QTableWidgetItem(""))
-            self.gcode.table.setItem(row, 1, QTableWidgetItem(str(i)))
-            self.gcode.table.setItem(row, 2, QTableWidgetItem(ln))
+        # Bulk populate (rapide même pour 1000+ lignes)
+        self.gcode._populate_table(lines)
         self.gcode.lbl_progress.setText(f"0 de {len(lines)}")
         parsed = parse_program(text)
         self.path.set_program(parsed)
         self.path_3d.set_wire_span(persistence.get_float("slicer/wire_span", 1000.0))
         self.path_3d.set_program(parsed)
         self.job.load(lines)
+        self.gcode.set_estimates(estimate_program(parsed))
         self.status.append_info(f"Slicer : {len(lines)} lignes générées et chargées.")
 
     def _on_link_closed(self) -> None:
@@ -592,6 +596,7 @@ class MainWindow(QMainWindow):
         self.path_3d.set_wire_span(persistence.get_float("slicer/wire_span", 1000.0))
         self.path_3d.set_program(parsed)
         self.job.load(lines)
+        self.gcode.set_estimates(estimate_program(parsed))
 
     def _on_play(self) -> None:
         if not self.link.is_open():

@@ -74,6 +74,12 @@ class GcodePanel(QGroupBox):
         self.lbl_elapsed = QLabel("00:00:00")
         self.lbl_elapsed.setFont(QFont("Consolas", 10))
 
+        # Estimation du programme (calculé à load)
+        self.lbl_estimate = QLabel("")
+        self.lbl_estimate.setStyleSheet(
+            "color: #1f6feb; font-style: italic; padding: 4px 0;"
+        )
+
         top = QHBoxLayout()
         top.addWidget(self.btn_open)
         top.addWidget(self.btn_simulate)
@@ -89,6 +95,10 @@ class GcodePanel(QGroupBox):
         info.addStretch(1)
         info.addWidget(QLabel("Écoulé"))
         info.addWidget(self.lbl_elapsed)
+
+        estimate_row = QHBoxLayout()
+        estimate_row.addWidget(self.lbl_estimate)
+        estimate_row.addStretch(1)
 
         self.table = QTableWidget(0, 3)
         self.table.setHorizontalHeaderLabels(["Sts", "Ligne", "Gcode"])
@@ -109,6 +119,7 @@ class GcodePanel(QGroupBox):
         v = QVBoxLayout(self)
         v.addLayout(top)
         v.addLayout(info)
+        v.addLayout(estimate_row)
         v.addWidget(self.table, 1)
 
         self._lines: list[str] = []
@@ -235,6 +246,27 @@ class GcodePanel(QGroupBox):
     @Slot(str)
     def set_elapsed(self, hms: str) -> None:
         self.lbl_elapsed.setText(hms)
+
+    def set_estimates(self, est: dict | None) -> None:
+        """Affiche les estimations (durée, longueur, etc.) sous le panneau.
+        `est` est un dict produit par gcode.parser.estimate_program."""
+        if not est or est.get("n_moves", 0) == 0:
+            self.lbl_estimate.setText("")
+            return
+        t = est["total_time_s"]
+        h = int(t) // 3600
+        m = (int(t) % 3600) // 60
+        s = int(t) % 60
+        if h > 0:
+            time_str = f"{h}h {m:02d}min {s:02d}s"
+        else:
+            time_str = f"{m} min {s:02d} s"
+        self.lbl_estimate.setText(
+            f"⏱ ≈ {time_str}"
+            f"   ·   📏 {est['total_length_mm']:.0f} mm trajet"
+            f"   ·   🔥 {est['wire_length_mm']:.0f} mm fil chaud"
+            f"   ·   {est['n_moves']} déplacements"
+        )
 
     def append_status_message(self, msg: str) -> None:
         # Hook si plus tard on veut afficher des erreurs en pied de panneau.

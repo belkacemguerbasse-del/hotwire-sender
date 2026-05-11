@@ -181,15 +181,36 @@ class PathView3D(QWidget):
         )
         self._view.addItem(self._wire)
 
-        # Surface balayée (paires de points en mode "lines")
-        self._sweep = gl.GLLinePlotItem(
+        # Surface balayée — 3 catégories en couleurs différentes :
+        # G1 + fil ON  : rouge soutenu (la vraie coupe)
+        # G1 + fil OFF : gris pointillé (lead-in/out)
+        # G0 (rapide)  : vert très discret
+        self._sweep_cut = gl.GLLinePlotItem(
             pos=np.zeros((1, 3), dtype=np.float32),
-            color=(0.55, 0.6, 0.7, 0.45),
+            color=(0.84, 0.21, 0.24, 0.55),   # rouge translucide
+            width=1.5,
+            antialias=True,
+            mode="lines",
+        )
+        self._sweep_lead = gl.GLLinePlotItem(
+            pos=np.zeros((1, 3), dtype=np.float32),
+            color=(0.55, 0.6, 0.7, 0.35),     # gris translucide
             width=1.0,
             antialias=True,
             mode="lines",
         )
-        self._view.addItem(self._sweep)
+        self._sweep_rapid = gl.GLLinePlotItem(
+            pos=np.zeros((1, 3), dtype=np.float32),
+            color=(0.12, 0.62, 0.34, 0.30),   # vert translucide
+            width=1.0,
+            antialias=True,
+            mode="lines",
+        )
+        # Alias pour la compat avec l'ancien code de visibility toggle
+        self._sweep = self._sweep_cut
+        self._view.addItem(self._sweep_cut)
+        self._view.addItem(self._sweep_lead)
+        self._view.addItem(self._sweep_rapid)
 
         # Boîte englobante (mise à jour avec set_program)
         self._bbox = gl.GLLinePlotItem(
@@ -398,7 +419,7 @@ class PathView3D(QWidget):
             return
         items = {
             "_show_profiles": [self._curve_root, self._curve_tip],
-            "_show_sweep":    [self._sweep],
+            "_show_sweep":    [self._sweep_cut, self._sweep_lead, self._sweep_rapid],
             "_show_wire":     [self._wire],
         }.get(attr, [])
         for it in items:
@@ -476,7 +497,9 @@ class PathView3D(QWidget):
             empty = np.zeros((1, 3), dtype=np.float32)
             self._curve_root.setData(pos=empty)
             self._curve_tip.setData(pos=empty)
-            self._sweep.setData(pos=empty)
+            self._sweep_cut.setData(pos=empty)
+            self._sweep_lead.setData(pos=empty)
+            self._sweep_rapid.setData(pos=empty)
             self._bbox.setData(pos=empty)
             self._loaded_extents = None
             self.lbl_info.setText("Aucun programme chargé")
@@ -488,11 +511,28 @@ class PathView3D(QWidget):
         self._curve_root.setData(pos=root_pts)
         self._curve_tip.setData(pos=tip_pts)
 
-        n = len(moves)
-        sweep = np.empty((n * 2, 3), dtype=np.float32)
-        sweep[0::2] = root_pts
-        sweep[1::2] = tip_pts
-        self._sweep.setData(pos=sweep)
+        # Catégorise chaque segment selon (rapid, wire_on) pour le code couleur
+        sweep_cut: list = []
+        sweep_lead: list = []
+        sweep_rapid: list = []
+        for i, m in enumerate(moves):
+            pair = (root_pts[i], tip_pts[i])
+            if m.rapid:
+                sweep_rapid.extend(pair)
+            elif m.wire_on:
+                sweep_cut.extend(pair)
+            else:
+                sweep_lead.extend(pair)
+        empty = np.zeros((1, 3), dtype=np.float32)
+        self._sweep_cut.setData(
+            pos=(np.array(sweep_cut, dtype=np.float32) if sweep_cut else empty)
+        )
+        self._sweep_lead.setData(
+            pos=(np.array(sweep_lead, dtype=np.float32) if sweep_lead else empty)
+        )
+        self._sweep_rapid.setData(
+            pos=(np.array(sweep_rapid, dtype=np.float32) if sweep_rapid else empty)
+        )
 
         # Bbox pour visu + fit
         all_pts = np.vstack([root_pts, tip_pts])

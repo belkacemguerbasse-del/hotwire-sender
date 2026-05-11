@@ -1,8 +1,11 @@
-"""Vues 2D : XY Wire Path (chariot gauche) et ZA Wire Path (chariot droit).
+"""Vues 2D : XY Wire Path (chariot gauche) et AZ Wire Path (chariot droit).
 
-Trace :
-- chemin programmé (G0 en gris pointillé, G1/G2/G3 en rouge)
-- position courante (croix) avec mise à jour temps réel
+Trace 3 catégories de mouvements en couleurs distinctes :
+- G0 (rapide) : VERT pointillé fin → déplacements hors mousse
+- G1 fil ON  : ROUGE plein épais → coupe effective dans la mousse
+- G1 fil OFF : GRIS pointillé → lead-in / lead-out / approche
+
++ position courante (croix bleue) animée par les status reports.
 """
 
 from __future__ import annotations
@@ -27,19 +30,31 @@ class _SinglePathPlot(pg.PlotWidget):
         self.setTitle(title)
         self.setAspectLocked(True)
 
-        self._cut_curve = self.plot([], [], pen=pg.mkPen("r", width=2))
+        # G1 fil ON : rouge plein épais (coupe réelle)
+        self._cut_curve = self.plot(
+            [], [], pen=pg.mkPen("#d6363d", width=2.4)
+        )
+        # G1 fil OFF : gris pointillé (lead-in / lead-out)
+        self._lead_curve = self.plot(
+            [], [], pen=pg.mkPen((130, 130, 130), width=1.4,
+                                 style=pg.QtCore.Qt.DashLine)
+        )
+        # G0 rapide : vert pointillé fin (déplacements à vide)
         self._rapid_curve = self.plot(
-            [], [], pen=pg.mkPen((150, 150, 150), width=1, style=pg.QtCore.Qt.DashLine)
+            [], [], pen=pg.mkPen((30, 157, 85, 200), width=1,
+                                 style=pg.QtCore.Qt.DotLine)
         )
         self._cursor = self.plot(
             [0], [0], pen=None, symbol="+", symbolSize=14,
-            symbolPen=pg.mkPen("b", width=2)
+            symbolPen=pg.mkPen("#1f6feb", width=2)
         )
 
     def set_program(self, moves, x_key: str, y_key: str) -> None:
-        cut_x: list[float] = []
+        cut_x: list[float] = []      # G1 + fil ON
         cut_y: list[float] = []
-        rap_x: list[float] = []
+        lead_x: list[float] = []     # G1 + fil OFF
+        lead_y: list[float] = []
+        rap_x: list[float] = []      # G0
         rap_y: list[float] = []
         last = (0.0, 0.0)
         for m in moves:
@@ -48,13 +63,17 @@ class _SinglePathPlot(pg.PlotWidget):
             if m.rapid:
                 rap_x += [last[0], x, np.nan]
                 rap_y += [last[1], y, np.nan]
-            else:
+            elif m.wire_on:
                 cut_x += [last[0], x, np.nan]
                 cut_y += [last[1], y, np.nan]
+            else:
+                lead_x += [last[0], x, np.nan]
+                lead_y += [last[1], y, np.nan]
             last = (x, y)
         self._cut_curve.setData(cut_x, cut_y, connect="finite")
+        self._lead_curve.setData(lead_x, lead_y, connect="finite")
         self._rapid_curve.setData(rap_x, rap_y, connect="finite")
-        if cut_x or rap_x:
+        if cut_x or rap_x or lead_x:
             self.autoRange()
 
     def set_cursor(self, x: float, y: float) -> None:
