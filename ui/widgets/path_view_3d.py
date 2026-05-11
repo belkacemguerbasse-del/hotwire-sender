@@ -545,7 +545,7 @@ class PathView3D(QWidget):
         self._bbox.setData(pos=_bbox_lines(xmin, ymin, zmin, xmax, ymax, zmax))
 
         self.lbl_info.setText(
-            f"{n} points · corde {xmax - xmin:.0f} mm · "
+            f"{len(moves)} points · corde {xmax - xmin:.0f} mm · "
             f"envergure {ymax - ymin:.0f} mm · épaisseur {zmax - zmin:.0f} mm"
         )
         self.fit_view()
