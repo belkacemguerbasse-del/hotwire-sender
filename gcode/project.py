@@ -40,6 +40,8 @@ class CutParamsDict:
     n_resample: int = 200
     safe_y: float = 80.0
     mode: str = "single"
+    adaptive_kerf: bool = False
+    kerf_ref_feed: float = 300.0
 
 
 @dataclass

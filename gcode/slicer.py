@@ -44,6 +44,37 @@ class CutParams:
     n_resample: int = 200        # points par profil
     safe_x: float = 0.0          # X de retour en sécurité
     safe_y: float = 80.0         # Y de retour en sécurité (dégagé du bloc)
+    # --- Kerf adaptatif ---
+    # Quand le fil va lentement il mange plus de mousse → kerf augmente.
+    # Si adaptive_kerf=True, on multiplie chaque kerf de section par
+    # (kerf_ref_feed / feed). Donc :
+    # - feed = kerf_ref_feed : kerf inchangé
+    # - feed < kerf_ref_feed : kerf augmenté proportionnellement
+    # - feed > kerf_ref_feed : kerf réduit
+    adaptive_kerf: bool = False
+    kerf_ref_feed: float = 300.0  # mm/min, vitesse à laquelle le kerf est nominal
+
+
+def _adjusted_sections(wing: WingDefinition, params: CutParams) -> list[Section]:
+    """Retourne une copie des sections du wing avec le kerf ajusté si
+    adaptive_kerf est activé. N'altère pas le wing d'origine."""
+    if not params.adaptive_kerf or params.feed <= 0 or params.kerf_ref_feed <= 0:
+        return list(wing.sections)
+    factor = params.kerf_ref_feed / params.feed
+    out: list[Section] = []
+    for s in wing.sections:
+        out.append(Section(
+            span_y_mm=s.span_y_mm,
+            profile_path=s.profile_path,
+            profile_name=s.profile_name,
+            chord_mm=s.chord_mm,
+            twist_deg=s.twist_deg,
+            offset_x_mm=s.offset_x_mm,
+            offset_y_mm=s.offset_y_mm,
+            kerf_mm=s.kerf_mm * factor,
+            profile=s.profile,
+        ))
+    return out
 
 
 def project(
@@ -169,8 +200,9 @@ def generate_gcode_wing(
     if wing.n_panels == 0:
         return [] if mode == "split" else []
 
-    # Profils transformés pour chaque section
-    transformed = [s.transformed() for s in wing.sections]
+    # Sections (potentiellement avec kerf ajusté si adaptive_kerf actif)
+    sections = _adjusted_sections(wing, params)
+    transformed = [s.transformed() for s in sections]
     if any(p is None for p in transformed):
         raise ValueError("Toutes les sections doivent avoir un profil chargé.")
 

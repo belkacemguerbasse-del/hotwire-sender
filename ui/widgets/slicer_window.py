@@ -344,9 +344,31 @@ class SlicerWindow(QDialog):
             "pour repositionner le bloc.\n"
             "Séparé : tu enregistres N fichiers .gcode (un par panneau)."
         )
+
+        # --- Kerf adaptatif ---
+        from PySide6.QtWidgets import QCheckBox
+        self.cb_adaptive_kerf = QCheckBox("Kerf adaptatif (compense la vitesse)")
+        self.cb_adaptive_kerf.setToolTip(
+            "Active la compensation automatique du sillage selon la vitesse.\n"
+            "Plus le fil va lentement, plus il fait fondre la mousse autour de lui.\n"
+            "Formule : kerf_effectif = kerf × (vitesse_référence / vitesse_actuelle).\n"
+            "Si vitesse = référence : kerf inchangé.\n"
+            "Si vitesse = moitié de la référence : kerf doublé."
+        )
+        self.sb_kerf_ref_feed = QDoubleSpinBox()
+        self.sb_kerf_ref_feed.setRange(10, 5000)
+        self.sb_kerf_ref_feed.setSuffix(" mm/min")
+        self.sb_kerf_ref_feed.setValue(300.0)
+        self.sb_kerf_ref_feed.setToolTip(
+            "Vitesse de référence : c'est à cette vitesse que le kerf défini sur "
+            "chaque section sera appliqué tel quel."
+        )
+
         for sb in (self.sb_feed, self.sb_s, self.sb_leadin, self.sb_leadout,
-                   self.sb_n, self.sb_safe_y):
+                   self.sb_n, self.sb_safe_y, self.sb_kerf_ref_feed):
             sb.valueChanged.connect(self._update_preview)
+        self.cb_adaptive_kerf.toggled.connect(self._update_preview)
+
         fc = QFormLayout(gb_cut)
         fc.addRow("Avance de coupe :", self.sb_feed)
         fc.addRow("S (puissance fil) :", self.sb_s)
@@ -355,6 +377,8 @@ class SlicerWindow(QDialog):
         fc.addRow("Nb points par profil :", self.sb_n)
         fc.addRow("Y sécurité retour :", self.sb_safe_y)
         fc.addRow("Mode de génération :", self.cb_mode)
+        fc.addRow(self.cb_adaptive_kerf)
+        fc.addRow("Vitesse réf. kerf :", self.sb_kerf_ref_feed)
 
         # ---- Aperçu principal ----
         self.plot = pg.PlotWidget()
@@ -592,9 +616,22 @@ class SlicerWindow(QDialog):
         if wing is None:
             return
 
+        # Sections potentiellement avec kerf ajusté (preview = vue finale)
+        sections_for_preview = wing.sections
+        if self.cb_adaptive_kerf.isChecked() and self.sb_feed.value() > 0:
+            from gcode.slicer import _adjusted_sections
+            from gcode.slicer import CutParams as _CP
+            sections_for_preview = _adjusted_sections(
+                wing, _CP(
+                    feed=self.sb_feed.value(),
+                    adaptive_kerf=True,
+                    kerf_ref_feed=self.sb_kerf_ref_feed.value(),
+                )
+            )
+
         # Trace les profils transformés (chaque section dans sa couleur)
         transformed = []
-        for i, s in enumerate(wing.sections):
+        for i, s in enumerate(sections_for_preview):
             t = s.transformed()
             if t is None:
                 continue
@@ -696,6 +733,8 @@ class SlicerWindow(QDialog):
                 leadout_mm=self.sb_leadout.value(),
                 n_resample=self.sb_n.value(),
                 safe_y=self.sb_safe_y.value(),
+                adaptive_kerf=self.cb_adaptive_kerf.isChecked(),
+                kerf_ref_feed=self.sb_kerf_ref_feed.value(),
             )
             mode = self.cb_mode.currentData()
             return generate_gcode_wing(wing, geom, params, mode=mode), mode
@@ -786,6 +825,8 @@ class SlicerWindow(QDialog):
                 n_resample=self.sb_n.value(),
                 safe_y=self.sb_safe_y.value(),
                 mode=self.cb_mode.currentData() or "single",
+                adaptive_kerf=self.cb_adaptive_kerf.isChecked(),
+                kerf_ref_feed=self.sb_kerf_ref_feed.value(),
             ),
         )
 
@@ -855,6 +896,11 @@ class SlicerWindow(QDialog):
         idx = self.cb_mode.findData(project.cut_params.mode)
         if idx >= 0:
             self.cb_mode.setCurrentIndex(idx)
+        # Kerf adaptatif (champ peut être absent dans les anciens .hwproj)
+        if hasattr(project.cut_params, "adaptive_kerf"):
+            self.cb_adaptive_kerf.setChecked(project.cut_params.adaptive_kerf)
+        if hasattr(project.cut_params, "kerf_ref_feed"):
+            self.sb_kerf_ref_feed.setValue(project.cut_params.kerf_ref_feed)
         self._update_section_indices()
         self._update_preview()
 
@@ -876,6 +922,8 @@ class SlicerWindow(QDialog):
         self.sb_leadout.setValue(persistence.get_float("slicer/leadout", defaults["leadout"]))
         self.sb_n.setValue(persistence.get_int("slicer/n_resample", defaults["n_resample"]))
         self.sb_safe_y.setValue(persistence.get_float("slicer/safe_y", defaults["safe_y"]))
+        self.cb_adaptive_kerf.setChecked(persistence.get_bool("slicer/adaptive_kerf", False))
+        self.sb_kerf_ref_feed.setValue(persistence.get_float("slicer/kerf_ref_feed", 300.0))
 
         mode = persistence.get_str("slicer/mode", defaults["mode"])
         idx = self.cb_mode.findData(mode)
@@ -913,6 +961,8 @@ class SlicerWindow(QDialog):
         persistence.set_("slicer/n_resample", self.sb_n.value())
         persistence.set_("slicer/safe_y", self.sb_safe_y.value())
         persistence.set_("slicer/mode", self.cb_mode.currentData() or "single")
+        persistence.set_("slicer/adaptive_kerf", self.cb_adaptive_kerf.isChecked())
+        persistence.set_("slicer/kerf_ref_feed", self.sb_kerf_ref_feed.value())
         # WingDefinition
         wing = WingDefinition(sections=[p.to_section() for p in self._sections])
         persistence.set_("slicer/wing_json", wing.to_json())
