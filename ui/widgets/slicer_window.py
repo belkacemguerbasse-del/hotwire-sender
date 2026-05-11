@@ -430,6 +430,7 @@ class SlicerWindow(QDialog):
         # ---- Boutons d'action ----
         self.btn_open_project = QPushButton("📂  Ouvrir projet…")
         self.btn_save_project = QPushButton("💾  Sauver projet…")
+        self.btn_export_pdf = QPushButton("📄  Fiche PDF…")
         self.btn_open_project.setToolTip(
             "Ouvre un fichier .hwproj : restaure toutes les sections, "
             "la géométrie machine et les paramètres de coupe."
@@ -438,15 +439,21 @@ class SlicerWindow(QDialog):
             "Sauve l'état complet du slicer dans un fichier .hwproj. "
             "Pratique pour découper l'aile miroir avec exactement le même setup."
         )
+        self.btn_export_pdf.setToolTip(
+            "Exporte une fiche PDF avec la géométrie machine, la liste des "
+            "sections, les paramètres de coupe et les estimations. À conserver "
+            "avec le G-code pour traçabilité."
+        )
         self.btn_open_project.clicked.connect(self._open_project)
         self.btn_save_project.clicked.connect(self._save_project)
+        self.btn_export_pdf.clicked.connect(self._export_pdf)
 
         self.btn_preview = QPushButton("Rafraîchir l'aperçu")
         self.btn_save = QPushButton("Générer & sauver…")
         self.btn_load_in_app = QPushButton("Générer & charger dans l'app")
         self.btn_close = QPushButton("Fermer")
-        for b in (self.btn_open_project, self.btn_save_project, self.btn_preview,
-                  self.btn_save, self.btn_load_in_app, self.btn_close):
+        for b in (self.btn_open_project, self.btn_save_project, self.btn_export_pdf,
+                  self.btn_preview, self.btn_save, self.btn_load_in_app, self.btn_close):
             b.setMinimumHeight(34)
         self.btn_save.setProperty("variant", "primary")
         self.btn_load_in_app.setProperty("variant", "primary")
@@ -463,6 +470,7 @@ class SlicerWindow(QDialog):
         actions = QHBoxLayout()
         actions.addWidget(self.btn_open_project)
         actions.addWidget(self.btn_save_project)
+        actions.addWidget(self.btn_export_pdf)
         actions.addSpacing(20)
         actions.addWidget(self.btn_preview)
         actions.addStretch(1)
@@ -846,6 +854,63 @@ class SlicerWindow(QDialog):
             QMessageBox.critical(self, "Erreur", f"Écriture impossible : {e}")
             return
         QMessageBox.information(self, "Projet sauvé", f"Sauvegardé dans :\n{path}")
+
+    def _export_pdf(self) -> None:
+        """Exporte une fiche PDF du projet courant."""
+        project = self._current_project()
+        if project.wing.n_sections < MIN_SECTIONS:
+            QMessageBox.warning(
+                self, "Projet incomplet",
+                "Configure au moins 2 sections avant d'exporter la fiche."
+            )
+            return
+        # Estimation : si on a un wing complet avec profils, on génère
+        # un G-code éphémère pour avoir des chiffres réalistes.
+        estimate = None
+        try:
+            wing = self._build_wing()
+            if wing is not None:
+                from gcode.parser import estimate_program, parse_program
+                from gcode.slicer import (
+                    CutGeometry, CutParams, generate_gcode_wing,
+                )
+                geom = CutGeometry(
+                    wire_span=self.sb_wire_span.value(),
+                    block_root_x=self.sb_block_root.value(),
+                    block_tip_x=self.sb_block_tip.value(),
+                )
+                params = CutParams(
+                    feed=self.sb_feed.value(),
+                    hot_wire_s=self.sb_s.value(),
+                    leadin_mm=self.sb_leadin.value(),
+                    leadout_mm=self.sb_leadout.value(),
+                    n_resample=self.sb_n.value(),
+                    safe_y=self.sb_safe_y.value(),
+                    adaptive_kerf=self.cb_adaptive_kerf.isChecked(),
+                    kerf_ref_feed=self.sb_kerf_ref_feed.value(),
+                )
+                lines = generate_gcode_wing(wing, geom, params, mode="single")
+                if isinstance(lines, list) and lines and isinstance(lines[0], str):
+                    parsed = parse_program("\n".join(lines))
+                    estimate = estimate_program(parsed)
+        except Exception:
+            pass
+
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Exporter la fiche PDF", "fiche_coupe.pdf",
+            "PDF (*.pdf);;Tous (*)",
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".pdf"):
+            path += ".pdf"
+        try:
+            from gcode.report import export_pdf
+            export_pdf(project, path, estimate=estimate)
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur PDF", f"Échec de l'export : {e}")
+            return
+        QMessageBox.information(self, "PDF exporté", f"Fiche enregistrée :\n{path}")
 
     def _open_project(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
