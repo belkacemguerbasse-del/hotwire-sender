@@ -26,6 +26,7 @@ from core.macros import MacroStore
 from core.machine_state import MachineState
 from core.simulator import GcodeSimulator
 from gcode.parser import estimate_program, parse_program
+from ui.i18n import tr
 from ui.theme import card_shadow
 from ui.widgets.preferences_panel import load_prefs
 
@@ -152,10 +153,10 @@ class MainWindow(QMainWindow):
 
         # Onglets : Pilotage / Vue 3D / Réglages / Macros
         tabs = QTabWidget()
-        tabs.addTab(splitter, "Pilotage")
-        tabs.addTab(self.path_3d, "Vue 3D")
-        tabs.addTab(self._build_settings_tab(), "Réglages")
-        tabs.addTab(self._build_macros_tab(), "Macros")
+        tabs.addTab(splitter, tr("Pilotage"))
+        tabs.addTab(self.path_3d, tr("Vue 3D"))
+        tabs.addTab(self._build_settings_tab(), tr("Réglages"))
+        tabs.addTab(self._build_macros_tab(), tr("Macros"))
 
         # Container central : header + tabs
         central = QWidget()

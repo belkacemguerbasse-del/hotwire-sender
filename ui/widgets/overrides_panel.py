@@ -24,6 +24,7 @@ from core.grbl_protocol import (
     CMD_SPINDLE_OVR_FINE_PLUS,
     CMD_SPINDLE_OVR_RESET,
 )
+from ui.i18n import tr
 
 
 class _OverrideRow(QGroupBox):
@@ -59,21 +60,21 @@ class OverridesPanel(QWidget):
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self.feed = _OverrideRow(
-            "Remplacer le taux d'avance",
+            tr("Remplacer le taux d'avance"),
             {
                 "-10%": CMD_FEED_OVR_COARSE_MINUS,
                 "- 1%": CMD_FEED_OVR_FINE_MINUS,
-                "Réinit": CMD_FEED_OVR_RESET,
+                tr("Réinit"): CMD_FEED_OVR_RESET,
                 "+ 1%": CMD_FEED_OVR_FINE_PLUS,
                 "+10%": CMD_FEED_OVR_COARSE_PLUS,
             },
         )
         self.spindle = _OverrideRow(
-            "Remplacer le paramètre actuel",
+            tr("Remplacer le paramètre actuel"),
             {
                 "-10%": CMD_SPINDLE_OVR_COARSE_MINUS,
                 "- 1%": CMD_SPINDLE_OVR_FINE_MINUS,
-                "Réinit": CMD_SPINDLE_OVR_RESET,
+                tr("Réinit"): CMD_SPINDLE_OVR_RESET,
                 "+ 1%": CMD_SPINDLE_OVR_FINE_PLUS,
                 "+10%": CMD_SPINDLE_OVR_COARSE_PLUS,
             },

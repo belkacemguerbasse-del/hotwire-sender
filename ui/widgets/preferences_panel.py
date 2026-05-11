@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from core import persistence
+from ui.i18n import tr
 
 
 class PreferencesPanel(QGroupBox):
@@ -33,14 +34,14 @@ class PreferencesPanel(QGroupBox):
     settings_applied = Signal(dict)
 
     def __init__(self, parent: QWidget | None = None):
-        super().__init__("Préférences", parent)
+        super().__init__(tr("Préférences"), parent)
 
-        self.cb_autoconnect = QCheckBox("Connecter automatiquement à l'ouverture")
+        self.cb_autoconnect = QCheckBox(tr("Connecter automatiquement à l'ouverture"))
         self.cb_autoconnect.setToolTip(
             "À chaque démarrage, ouvre le dernier port utilisé sans intervention."
         )
 
-        self.cb_pause_on_error = QCheckBox("Pause automatique sur erreur Grbl")
+        self.cb_pause_on_error = QCheckBox(tr("Pause automatique sur erreur Grbl"))
         self.cb_pause_on_error.setToolTip(
             "En cas de réponse `error:` pendant un programme, met en pause "
             "le job pour que tu puisses inspecter avant de continuer."
@@ -67,8 +68,8 @@ class PreferencesPanel(QGroupBox):
 
         # --- Apparence ---
         self.cb_theme = QComboBox()
-        self.cb_theme.addItem("Clair", "light")
-        self.cb_theme.addItem("Sombre", "dark")
+        self.cb_theme.addItem(tr("Clair"), "light")
+        self.cb_theme.addItem(tr("Sombre"), "dark")
         self.cb_theme.setToolTip(
             "Bascule l'apparence générale de l'application.\n"
             "Le changement est appliqué immédiatement."
@@ -82,7 +83,7 @@ class PreferencesPanel(QGroupBox):
             "au prochain redémarrage de l'application."
         )
 
-        self.cb_watchdog = QCheckBox("Watchdog de sécurité")
+        self.cb_watchdog = QCheckBox(tr("Watchdog de sécurité"))
         self.cb_watchdog.setToolTip(
             "Si aucun status report n'arrive pendant le délai ci-dessous "
             "alors qu'un job est en cours, coupe le fil chaud + met en pause "
@@ -102,13 +103,13 @@ class PreferencesPanel(QGroupBox):
         form.addRow(self.cb_autoconnect)
         form.addRow(self.cb_pause_on_error)
         form.addRow(self.cb_watchdog)
-        form.addRow("Délai watchdog :", self.sb_watchdog_s)
-        form.addRow("Intervalle status :", self.sb_poll_ms)
-        form.addRow("Silence bootloader :", self.sb_boot_delay)
-        form.addRow("Thème :", self.cb_theme)
-        form.addRow("Langue :", self.cb_lang)
+        form.addRow(tr("Délai watchdog :"), self.sb_watchdog_s)
+        form.addRow(tr("Intervalle status :"), self.sb_poll_ms)
+        form.addRow(tr("Silence bootloader :"), self.sb_boot_delay)
+        form.addRow(tr("Thème :"), self.cb_theme)
+        form.addRow(tr("Langue :"), self.cb_lang)
 
-        self.btn_apply = QPushButton("Appliquer")
+        self.btn_apply = QPushButton(tr("Appliquer"))
         self.btn_apply.setProperty("variant", "primary")
         self.btn_apply.setMinimumHeight(30)
         self.btn_apply.clicked.connect(self._apply)

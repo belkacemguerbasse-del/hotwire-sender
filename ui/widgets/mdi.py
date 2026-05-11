@@ -12,6 +12,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ui.i18n import tr
+
 
 class _HistoryEdit(QLineEdit):
     def __init__(self, parent: QWidget | None = None):
@@ -45,11 +47,11 @@ class MdiPanel(QGroupBox):
     slice_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None):
-        super().__init__("MDI", parent)
+        super().__init__(tr("MDI"), parent)
         self.edit = _HistoryEdit()
-        self.edit.setPlaceholderText("Commande manuelle…")
-        self.btn = QPushButton("Envoyer")
-        self.btn_slice = QPushButton("Slice")
+        self.edit.setPlaceholderText(tr("Commande manuelle…"))
+        self.btn = QPushButton(tr("Envoyer"))
+        self.btn_slice = QPushButton(tr("Slice"))
 
         self.edit.returnPressed.connect(self._submit)
         self.btn.clicked.connect(self._submit)

@@ -5,6 +5,8 @@ from __future__ import annotations
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QGridLayout, QGroupBox, QPushButton, QVBoxLayout, QWidget
 
+from ui.i18n import tr
+
 
 class ControlPanel(QWidget):
     home_requested = Signal()
@@ -17,12 +19,12 @@ class ControlPanel(QWidget):
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
 
-        self.btn_home = QPushButton("Cycle référencement")
-        self.btn_unlock = QPushButton("Débloq.")
-        self.btn_reset = QPushButton("Réinit.")
-        self.btn_hold = QPushButton("Retiens")
-        self.btn_resume = QPushButton("Départ")
-        self.btn_check = QPushButton("Vérifie")
+        self.btn_home = QPushButton(tr("Cycle référencement"))
+        self.btn_unlock = QPushButton(tr("Débloq."))
+        self.btn_reset = QPushButton(tr("Réinit."))
+        self.btn_hold = QPushButton(tr("Retiens"))
+        self.btn_resume = QPushButton(tr("Départ"))
+        self.btn_check = QPushButton(tr("Vérifie"))
 
         for b in (
             self.btn_home,
@@ -41,11 +43,11 @@ class ControlPanel(QWidget):
         self.btn_resume.clicked.connect(self.resume_requested)
         self.btn_check.clicked.connect(self.check_toggle_requested)
 
-        gb_home = QGroupBox("Référencement")
+        gb_home = QGroupBox(tr("Référencement"))
         v1 = QVBoxLayout(gb_home)
         v1.addWidget(self.btn_home)
 
-        gb_ctrl = QGroupBox("Contrôle")
+        gb_ctrl = QGroupBox(tr("Contrôle"))
         g = QGridLayout(gb_ctrl)
         g.addWidget(self.btn_unlock, 0, 0)
         g.addWidget(self.btn_reset, 0, 1)

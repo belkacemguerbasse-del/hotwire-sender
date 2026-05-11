@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 
 from core.grbl_link import list_serial_ports
 from core import persistence
+from ui.i18n import tr
 
 BAUDS = ["9600", "19200", "38400", "57600", "115200", "230400", "250000"]
 
@@ -23,13 +24,13 @@ class ConnectionBar(QGroupBox):
     disconnect_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None):
-        super().__init__("Grbl", parent)
+        super().__init__(tr("Grbl"), parent)
         self.cb_port = QComboBox()
         self.cb_baud = QComboBox()
         self.cb_baud.addItems(BAUDS)
         self.cb_baud.setCurrentText("115200")
-        self.btn_connect = QPushButton("Connecter")
-        self.btn_rescan = QPushButton("Re-Scan")
+        self.btn_connect = QPushButton(tr("Connecter"))
+        self.btn_rescan = QPushButton(tr("Re-Scan"))
 
         self.btn_rescan.clicked.connect(self.refresh_ports)
         self.btn_connect.clicked.connect(self._toggle)
@@ -73,7 +74,7 @@ class ConnectionBar(QGroupBox):
 
     def set_open(self, is_open: bool) -> None:
         self._open = is_open
-        self.btn_connect.setText("Déconnecter" if is_open else "Connecter")
+        self.btn_connect.setText(tr("Déconnecter") if is_open else tr("Connecter"))
         self.cb_port.setEnabled(not is_open)
         self.cb_baud.setEnabled(not is_open)
         self.btn_rescan.setEnabled(not is_open)

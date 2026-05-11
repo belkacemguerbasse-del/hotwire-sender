@@ -21,6 +21,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ui.i18n import tr
+
 JOG_DISTANCES = (100.0, 50.0, 10.0, 1.0)
 JOG_FEEDS = (300, 200, 100, 50)
 
@@ -31,11 +33,11 @@ class JogSettings(QGroupBox):
     keyboard_toggled = Signal(bool)
 
     def __init__(self, parent: QWidget | None = None):
-        super().__init__("Jogging", parent)
+        super().__init__(tr("Jogging"), parent)
         self.distance = 10.0
         self.feed = 300
 
-        gb_dist = QGroupBox("Distance")
+        gb_dist = QGroupBox(tr("Distance"))
         gd = QVBoxLayout(gb_dist)
         self._dist_group = QButtonGroup(self)
         for i, d in enumerate(JOG_DISTANCES):
@@ -46,7 +48,7 @@ class JogSettings(QGroupBox):
             self._dist_group.addButton(rb)
             gd.addWidget(rb)
 
-        gb_feed = QGroupBox("Vit. Avance")
+        gb_feed = QGroupBox(tr("Vit. Avance"))
         gf = QVBoxLayout(gb_feed)
         self._feed_group = QButtonGroup(self)
         for f in JOG_FEEDS:
@@ -57,9 +59,9 @@ class JogSettings(QGroupBox):
             self._feed_group.addButton(rb)
             gf.addWidget(rb)
 
-        self.cb_metric = QCheckBox("Métrique")
+        self.cb_metric = QCheckBox(tr("Métrique"))
         self.cb_metric.setChecked(True)
-        self.cb_keyboard = QCheckBox("Activer le clavier")
+        self.cb_keyboard = QCheckBox(tr("Activer le clavier"))
         self.cb_keyboard.toggled.connect(self.keyboard_toggled)
 
         right = QVBoxLayout()
@@ -97,7 +99,7 @@ class _Pad(QGroupBox):
         title: str,
         h_axis: str,
         v_axis: str,
-        zero_label: str = "Aller à 0",
+        zero_label: str | None = None,
         parent: QWidget | None = None,
     ):
         super().__init__(title, parent)
@@ -109,7 +111,8 @@ class _Pad(QGroupBox):
         self.btn_left = QPushButton(f"{h_axis}-")
         self.btn_right = QPushButton(f"{h_axis}+")
         self.btn_zero = QPushButton("0")
-        self.btn_goto_zero = QPushButton(zero_label.replace("\n", " "))
+        zl = zero_label if zero_label is not None else tr("Aller à 0")
+        self.btn_goto_zero = QPushButton(zl.replace("\n", " "))
         for b in (
             self.btn_up, self.btn_down, self.btn_left, self.btn_right, self.btn_zero,
         ):
@@ -148,17 +151,17 @@ class _SyncPad(QGroupBox):
     display_reset_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None):
-        super().__init__("jogger les deux chariots", parent)
+        super().__init__(tr("jogger les deux chariots"), parent)
 
         self.btn_up = QPushButton("↑")
         self.btn_down = QPushButton("↓")
         self.btn_left = QPushButton("←")
         self.btn_right = QPushButton("→")
         self.btn_zero = QPushButton("0")
-        self.btn_goto_zero = QPushButton("Aller à 0 (tout)")
-        self.btn_goto_zero.setToolTip("Déplace les 4 axes au zéro WCO actuel")
-        self.btn_reset = QPushButton("Reset affichage")
-        self.btn_reset.setToolTip("Remet la position à zéro côté affichage uniquement")
+        self.btn_goto_zero = QPushButton(tr("Aller à 0 (tout)"))
+        self.btn_goto_zero.setToolTip(tr("Déplace les 4 axes au zéro WCO actuel"))
+        self.btn_reset = QPushButton(tr("Reset affichage"))
+        self.btn_reset.setToolTip(tr("Remet la position à zéro côté affichage uniquement"))
 
         for b in (
             self.btn_up, self.btn_down, self.btn_left, self.btn_right, self.btn_zero,
@@ -202,8 +205,8 @@ class JogPanel(QWidget):
         # l'axe vertical = sens de l'épaisseur. Sur le chariot droit, le firmware
         # (et HotwireWing3D / GrblHotWire-Mega-5X d'origine) utilisent A = horizontal,
         # Z = vertical.
-        self.left = _Pad("Chariot gauche", h_axis="X", v_axis="Y", zero_label="Aller à\n0 XY")
-        self.right = _Pad("Chariot droit", h_axis="A", v_axis="Z", zero_label="Aller à\n0 ZA")
+        self.left = _Pad(tr("Chariot gauche"), h_axis="X", v_axis="Y", zero_label=tr("Aller à\n0 XY"))
+        self.right = _Pad(tr("Chariot droit"), h_axis="A", v_axis="Z", zero_label=tr("Aller à\n0 ZA"))
         self.sync = _SyncPad()
         self.settings = JogSettings()
 

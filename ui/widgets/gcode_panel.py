@@ -26,6 +26,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ui.i18n import tr
+
 
 # Brush utilisé pour surligner la ligne courante en exécution
 _HIGHLIGHT_BRUSH = QBrush(QColor("#cfe1ff"))   # bleu clair (cohérent avec thème)
@@ -42,15 +44,15 @@ class GcodePanel(QGroupBox):
     history_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None):
-        super().__init__("GCode", parent)
+        super().__init__(tr("GCode"), parent)
 
-        self.btn_open = QPushButton("Ouvrir…")
-        self.btn_simulate = QPushButton("🎬  Simuler")
-        self.btn_play = QPushButton("▶  Lancer")
-        self.btn_pause = QPushButton("⏸  Pause")
-        self.btn_stop = QPushButton("⏹  Stop")
-        self.btn_reload = QPushButton("↻  Recharger")
-        self.btn_history = QPushButton("📋  Historique")
+        self.btn_open = QPushButton(tr("Ouvrir…"))
+        self.btn_simulate = QPushButton(tr("🎬  Simuler"))
+        self.btn_play = QPushButton(tr("▶  Lancer"))
+        self.btn_pause = QPushButton(tr("⏸  Pause"))
+        self.btn_stop = QPushButton(tr("⏹  Stop"))
+        self.btn_reload = QPushButton(tr("↻  Recharger"))
+        self.btn_history = QPushButton(tr("📋  Historique"))
         self.btn_history.setToolTip(
             "Ouvre l'historique des programmes lancés : "
             "date, durée, état, lignes, et ré-import en 1 clic."

@@ -17,19 +17,20 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ui.i18n import tr
 from ui.theme import COLORS, mono_font
 
 
 class StatusPanel(QGroupBox):
     def __init__(self, parent: QWidget | None = None):
-        super().__init__("Journal Grbl", parent)
+        super().__init__(tr("Journal Grbl"), parent)
 
-        self.cb_verbose = QCheckBox("Verbeux")
+        self.cb_verbose = QCheckBox(tr("Verbeux"))
         self.cb_verbose.setToolTip(
-            "Afficher également les rapports d'état périodiques et les ack 'ok'."
+            tr("Afficher également les rapports d'état périodiques et les ack 'ok'.")
         )
 
-        self.btn_clear = QPushButton("Effacer")
+        self.btn_clear = QPushButton(tr("Effacer"))
         self.btn_clear.setFixedWidth(80)
 
         top = QHBoxLayout()

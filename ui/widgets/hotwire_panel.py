@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ui.i18n import tr
 from ui.theme import COLORS, mono_font, ui_font
 
 
@@ -27,13 +28,13 @@ class HotWirePanel(QGroupBox):
     turn_off_requested = Signal()
 
     def __init__(self, max_value: int = 1000, parent: QWidget | None = None):
-        super().__init__("Fil chaud", parent)
+        super().__init__(tr("Fil chaud"), parent)
         self.max_value = max_value
         self._on = False
         self._value = 0
 
         # --- Ligne 1 : libellé + valeur courante ---
-        self.lbl_title = QLabel("Puissance")
+        self.lbl_title = QLabel(tr("Puissance"))
         self.lbl_title.setStyleSheet(f"color: {COLORS['text_muted']};")
         self.lbl_value = QLabel("0")
         self.lbl_value.setFont(mono_font(14, bold=True))
@@ -58,7 +59,7 @@ class HotWirePanel(QGroupBox):
         self.lbl_status.setFont(ui_font(16, bold=True))
         self._refresh_status_style()
 
-        self.btn_toggle = QPushButton("ALLUMER LE FIL")
+        self.btn_toggle = QPushButton(tr("ALLUMER LE FIL"))
         self.btn_toggle.setProperty("variant", "primary")
         self.btn_toggle.setMinimumHeight(46)
         self.btn_toggle.setFont(ui_font(11, bold=True))
@@ -95,11 +96,11 @@ class HotWirePanel(QGroupBox):
     def set_on(self, on: bool) -> None:
         self._on = on
         if on:
-            self.btn_toggle.setText("COUPER LE FIL")
+            self.btn_toggle.setText(tr("COUPER LE FIL"))
             self.btn_toggle.setProperty("variant", "danger")
             self.lbl_status.setText("ON")
         else:
-            self.btn_toggle.setText("ALLUMER LE FIL")
+            self.btn_toggle.setText(tr("ALLUMER LE FIL"))
             self.btn_toggle.setProperty("variant", "primary")
             self.lbl_status.setText("OFF")
         # Re-style après changement de propriété

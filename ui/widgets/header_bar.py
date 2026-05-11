@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ui.i18n import tr
 from ui.theme import COLORS, card_shadow, ui_font, update_shadow_color
 
 
@@ -57,9 +58,9 @@ class HeaderBar(QFrame):
         self.setFixedHeight(64)
 
         # --- Titre ---
-        self.lbl_title = QLabel("HotWire Sender")
+        self.lbl_title = QLabel(tr("HotWire Sender"))
         self.lbl_title.setFont(ui_font(13, bold=True))
-        self.lbl_subtitle = QLabel("CNC fil chaud · 4 axes XYZA")
+        self.lbl_subtitle = QLabel(tr("CNC fil chaud · 4 axes XYZA"))
         self.lbl_subtitle.setFont(ui_font(9))
         self.lbl_subtitle.setStyleSheet(f"color: {COLORS['text_muted']};")
         title_box = QVBoxLayout()
@@ -72,7 +73,7 @@ class HeaderBar(QFrame):
         self.dot = QLabel("●")
         self.dot.setObjectName("connectionDot")
         self.dot.setStyleSheet(f"color: {COLORS['text_subtle']};")
-        self.lbl_conn = QLabel("Non connecté")
+        self.lbl_conn = QLabel(tr("Non connecté"))
         self.lbl_conn.setFont(ui_font(10, bold=True))
         conn_box = QHBoxLayout()
         conn_box.setContentsMargins(0, 0, 0, 0)
@@ -81,7 +82,7 @@ class HeaderBar(QFrame):
         conn_box.addWidget(self.lbl_conn)
 
         # --- Pastille d'état ---
-        self.pill = QLabel("INCONNU")
+        self.pill = QLabel(tr("INCONNU"))
         self.pill.setObjectName("statePill")
         self.pill.setAlignment(Qt.AlignCenter)
         self.pill.setMinimumWidth(140)
@@ -94,7 +95,7 @@ class HeaderBar(QFrame):
         )
 
         # --- Bouton Caméra ---
-        self.btn_camera = QPushButton("Caméra")
+        self.btn_camera = QPushButton(tr("Caméra"))
         self.btn_camera.setCheckable(True)
         self.btn_camera.setMinimumHeight(40)
         self.btn_camera.setMinimumWidth(110)
@@ -103,7 +104,7 @@ class HeaderBar(QFrame):
         self.btn_camera.clicked.connect(self.camera_toggle_requested)
 
         # --- Bouton ARRÊT ---
-        self.btn_estop = QPushButton("ARRÊT D'URGENCE")
+        self.btn_estop = QPushButton(tr("ARRÊT D'URGENCE"))
         self.btn_estop.setProperty("variant", "danger")
         self.btn_estop.setMinimumHeight(40)
         self.btn_estop.setMinimumWidth(190)
@@ -141,20 +142,21 @@ class HeaderBar(QFrame):
     def on_state(self, state: str) -> None:
         label = _STATE_LABEL_FR.get(state, state.upper())
         color = _state_color(state)
-        self.pill.setText(label)
+        self.pill.setText(tr(label))
         self._set_state_color(color)
         update_shadow_color(self._pill_shadow, color, alpha=140)
 
     def set_axes(self, axes_text: str) -> None:
-        self.lbl_subtitle.setText(f"CNC fil chaud · {axes_text}")
+        prefix = tr("CNC fil chaud · 4 axes XYZA").split("·")[0].strip()
+        self.lbl_subtitle.setText(f"{prefix} · {axes_text}")
 
     @Slot(str)
     def on_connected(self, port: str) -> None:
         self.dot.setStyleSheet(f"color: {COLORS['success']};")
-        self.lbl_conn.setText(f"Connecté · {port}")
+        self.lbl_conn.setText(f"{tr('Connecté')} · {port}")
 
     @Slot()
     def on_disconnected(self) -> None:
         self.dot.setStyleSheet(f"color: {COLORS['text_subtle']};")
-        self.lbl_conn.setText("Non connecté")
+        self.lbl_conn.setText(tr("Non connecté"))
         self.on_state("Unknown")
