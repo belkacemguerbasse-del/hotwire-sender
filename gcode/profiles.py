@@ -191,6 +191,87 @@ def morph(p1: Profile, p2: Profile, t: float, n_points: int = 200) -> Profile:
     return Profile(name=f"{p1.name} -> {p2.name} ({int(t * 100)}%)", points=pts)
 
 
+def _find_le_index(pts: list[tuple[float, float]]) -> int:
+    """Retourne l'indice du bord d'attaque (point avec x min)."""
+    return min(range(len(pts)), key=lambda i: pts[i][0])
+
+
+def sheeting_offset(p: Profile, upper_mm: float, lower_mm: float) -> Profile:
+    """Décale extrados (haut) de `upper_mm` et intrados (bas) de `lower_mm`
+    vers l'extérieur, pour simuler un coffrage balsa/fibre collé sur le profil.
+
+    Convention de parcours : TE → extrados → LE → intrados → TE.
+    Pour les points exactement au LE, on prend une moyenne pondérée des deux
+    valeurs pour éviter une discontinuité visible."""
+    if p.n < 3 or (abs(upper_mm) < 1e-9 and abs(lower_mm) < 1e-9):
+        return p.copy()
+    pts = p.points
+    le_idx = _find_le_index(pts)
+    closed = pts[0] == pts[-1]
+    n_path = len(pts) - (1 if closed else 0)
+
+    out: list[tuple[float, float]] = []
+    for i in range(len(pts)):
+        if closed and i == len(pts) - 1:
+            out.append(out[0])
+            break
+        prev_i = (i - 1) % n_path
+        next_i = (i + 1) % n_path
+        x0, y0 = pts[prev_i]
+        x1, y1 = pts[i]
+        x2, y2 = pts[next_i]
+        tx = x2 - x0
+        ty = y2 - y0
+        norm = math.hypot(tx, ty)
+        if norm < 1e-12:
+            out.append((x1, y1))
+            continue
+        nx = ty / norm
+        ny = -tx / norm
+        # Détermine la quantité de sheeting selon la position dans le parcours
+        if i < le_idx:
+            off = upper_mm
+        elif i > le_idx:
+            off = lower_mm
+        else:
+            # Au LE exact : transition douce
+            off = 0.5 * (upper_mm + lower_mm)
+        out.append((x1 + nx * off, y1 + ny * off))
+    return Profile(name=p.name, points=out)
+
+
+def extend_trailing_edge(p: Profile, extend_mm: float) -> Profile:
+    """Allonge tangentiellement le bord de fuite de `extend_mm`.
+
+    Ajoute un segment à chaque extrémité du parcours dans la direction
+    tangente locale, pour assurer une coupe nette du TE sans arrondi.
+    Le profil n'est plus fermé après cette opération (les deux nouveaux
+    points TE étendus encadrent l'ancien parcours)."""
+    if p.n < 2 or extend_mm <= 1e-9:
+        return p.copy()
+    pts = list(p.points)
+    # Si le profil est fermé, on duplique le point de départ
+    if pts[0] == pts[-1]:
+        pts = pts[:-1]
+    # Tangente au début (point 0 → point 1)
+    x0, y0 = pts[0]
+    x1, y1 = pts[1]
+    dx, dy = x0 - x1, y0 - y1
+    n = math.hypot(dx, dy)
+    if n > 1e-12:
+        ex0 = (x0 + dx / n * extend_mm, y0 + dy / n * extend_mm)
+        pts.insert(0, ex0)
+    # Tangente à la fin (avant-dernier → dernier)
+    xn1, yn1 = pts[-2]
+    xn, yn = pts[-1]
+    dx, dy = xn - xn1, yn - yn1
+    n = math.hypot(dx, dy)
+    if n > 1e-12:
+        exn = (xn + dx / n * extend_mm, yn + dy / n * extend_mm)
+        pts.append(exn)
+    return Profile(name=p.name, points=pts)
+
+
 def kerf_offset(p: Profile, offset_mm: float) -> Profile:
     """Décale chaque point selon la normale extérieure d'une distance `offset_mm`.
     Positif = vers l'extérieur (compense le sillage du fil chaud)."""

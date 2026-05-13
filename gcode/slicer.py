@@ -24,7 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from .profiles import Profile, resample
+from .profiles import Profile, extend_trailing_edge, resample, sheeting_offset
 from .wing import Section, WingDefinition
 
 
@@ -53,16 +53,53 @@ class CutParams:
     # - feed > kerf_ref_feed : kerf réduit
     adaptive_kerf: bool = False
     kerf_ref_feed: float = 300.0  # mm/min, vitesse à laquelle le kerf est nominal
+    # --- Sheeting (coffrage extrados/intrados) ---
+    sheeting_upper_mm: float = 0.0
+    sheeting_lower_mm: float = 0.0
+    # Allongement tangentiel du bord de fuite (mm)
+    tangent_extend_te_mm: float = 0.0
+    # --- Kerf différencié root/tip ---
+    # Si use_differential_kerf=True, le kerf des sections est remplacé par
+    # une interpolation linéaire entre kerf_root_mm et kerf_tip_mm selon la
+    # position span_y de chaque section.
+    use_differential_kerf: bool = False
+    kerf_root_mm: float = 0.0
+    kerf_tip_mm: float = 0.0
 
 
 def _adjusted_sections(wing: WingDefinition, params: CutParams) -> list[Section]:
-    """Retourne une copie des sections du wing avec le kerf ajusté si
-    adaptive_kerf est activé. N'altère pas le wing d'origine."""
-    if not params.adaptive_kerf or params.feed <= 0 or params.kerf_ref_feed <= 0:
-        return list(wing.sections)
-    factor = params.kerf_ref_feed / params.feed
+    """Retourne une copie des sections du wing avec :
+    - kerf différencié root/tip (interpolation linéaire) si activé
+    - kerf adaptatif selon la vitesse de coupe si activé
+    N'altère pas le wing d'origine."""
+    sections = wing.sections
+    if not sections:
+        return []
+
+    # --- Kerf différencié root/tip : remplace le kerf de chaque section ---
+    if params.use_differential_kerf and len(sections) >= 2:
+        y_root = sections[0].span_y_mm
+        y_tip = sections[-1].span_y_mm
+        span = y_tip - y_root
+        new_kerfs: list[float] = []
+        for s in sections:
+            if span <= 1e-9:
+                t = 0.0
+            else:
+                t = (s.span_y_mm - y_root) / span
+            new_kerfs.append(
+                (1.0 - t) * params.kerf_root_mm + t * params.kerf_tip_mm
+            )
+    else:
+        new_kerfs = [s.kerf_mm for s in sections]
+
+    # --- Kerf adaptatif selon la vitesse ---
+    factor = 1.0
+    if params.adaptive_kerf and params.feed > 0 and params.kerf_ref_feed > 0:
+        factor = params.kerf_ref_feed / params.feed
+
     out: list[Section] = []
-    for s in wing.sections:
+    for s, k in zip(sections, new_kerfs):
         out.append(Section(
             span_y_mm=s.span_y_mm,
             profile_path=s.profile_path,
@@ -71,9 +108,19 @@ def _adjusted_sections(wing: WingDefinition, params: CutParams) -> list[Section]
             twist_deg=s.twist_deg,
             offset_x_mm=s.offset_x_mm,
             offset_y_mm=s.offset_y_mm,
-            kerf_mm=s.kerf_mm * factor,
+            kerf_mm=k * factor,
             profile=s.profile,
         ))
+    return out
+
+
+def _apply_sheeting_and_te(p: Profile, params: CutParams) -> Profile:
+    """Applique le sheeting (coffrage) et l'allongement TE à un profil transformé."""
+    out = p
+    if abs(params.sheeting_upper_mm) > 1e-9 or abs(params.sheeting_lower_mm) > 1e-9:
+        out = sheeting_offset(out, params.sheeting_upper_mm, params.sheeting_lower_mm)
+    if params.tangent_extend_te_mm > 1e-9:
+        out = extend_trailing_edge(out, params.tangent_extend_te_mm)
     return out
 
 
@@ -165,7 +212,9 @@ def generate_gcode(
     params: CutParams,
 ) -> list[str]:
     """Génère un programme complet pour UN seul panneau (rétrocompat)."""
-    body = _generate_panel_body(root, tip, geom, params)
+    root_p = _apply_sheeting_and_te(root, params)
+    tip_p = _apply_sheeting_and_te(tip, params)
+    body = _generate_panel_body(root_p, tip_p, geom, params)
     if not body:
         return []
     out: list[str] = []
@@ -205,6 +254,8 @@ def generate_gcode_wing(
     transformed = [s.transformed() for s in sections]
     if any(p is None for p in transformed):
         raise ValueError("Toutes les sections doivent avoir un profil chargé.")
+    # Sheeting (coffrage) + allongement TE appliqués après kerf
+    transformed = [_apply_sheeting_and_te(p, params) for p in transformed]
 
     if mode == "split":
         out_files: list[list[str]] = []

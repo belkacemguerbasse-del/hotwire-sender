@@ -428,6 +428,14 @@ class SlicerWindow(QDialog):
         gb_slice.setMaximumWidth(440)
 
         # ---- Boutons d'action ----
+        self.btn_wizard = QPushButton("🪄  Wizard…")
+        self.btn_wizard.setToolTip(
+            "Ouvre le slicer guidé en 8 étapes (inspiré de Profili 2 Pro). "
+            "Pratique pour découper un panneau type planeur sans configurer "
+            "les sections manuellement."
+        )
+        self.btn_wizard.clicked.connect(self._launch_wizard)
+
         self.btn_open_project = QPushButton("📂  Ouvrir projet…")
         self.btn_save_project = QPushButton("💾  Sauver projet…")
         self.btn_export_pdf = QPushButton("📄  Fiche PDF…")
@@ -452,9 +460,11 @@ class SlicerWindow(QDialog):
         self.btn_save = QPushButton("Générer & sauver…")
         self.btn_load_in_app = QPushButton("Générer & charger dans l'app")
         self.btn_close = QPushButton("Fermer")
-        for b in (self.btn_open_project, self.btn_save_project, self.btn_export_pdf,
-                  self.btn_preview, self.btn_save, self.btn_load_in_app, self.btn_close):
+        for b in (self.btn_wizard, self.btn_open_project, self.btn_save_project,
+                  self.btn_export_pdf, self.btn_preview, self.btn_save,
+                  self.btn_load_in_app, self.btn_close):
             b.setMinimumHeight(34)
+        self.btn_wizard.setProperty("variant", "primary")
         self.btn_save.setProperty("variant", "primary")
         self.btn_load_in_app.setProperty("variant", "primary")
         self.btn_preview.clicked.connect(self._update_preview)
@@ -468,6 +478,8 @@ class SlicerWindow(QDialog):
         mid.addWidget(gb_cut, 1)
 
         actions = QHBoxLayout()
+        actions.addWidget(self.btn_wizard)
+        actions.addSpacing(12)
         actions.addWidget(self.btn_open_project)
         actions.addWidget(self.btn_save_project)
         actions.addWidget(self.btn_export_pdf)
@@ -837,6 +849,20 @@ class SlicerWindow(QDialog):
                 kerf_ref_feed=self.sb_kerf_ref_feed.value(),
             ),
         )
+
+    def _launch_wizard(self) -> None:
+        """Ouvre le slicer guidé. Sur Finish, transmet le G-code à la fenêtre
+        principale via le même signal que le mode classique."""
+        from .slicer_wizard import SlicerWizard
+        wiz = SlicerWizard(self)
+        wiz.gcode_generated.connect(self._on_wizard_gcode)
+        wiz.exec()
+
+    def _on_wizard_gcode(self, lines: list) -> None:
+        if not lines:
+            return
+        self.gcode_generated.emit(lines)
+        self.close()
 
     def _save_project(self) -> None:
         project = self._current_project()

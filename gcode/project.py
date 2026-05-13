@@ -29,6 +29,11 @@ class CutGeometryDict:
     wire_span: float = 1000.0
     block_root_x: float = 150.0
     block_tip_x: float = 850.0
+    # Épaisseur du bloc (T) — utile pour la coupe LE/TE et le placement vertical
+    block_thickness_mm: float = 50.0
+    # Hauteur du panneau (H) au-dessus de la base du bloc, root/tip
+    panel_height_root_mm: float = 25.0
+    panel_height_tip_mm: float = 25.0
 
 
 @dataclass
@@ -42,6 +47,16 @@ class CutParamsDict:
     mode: str = "single"
     adaptive_kerf: bool = False
     kerf_ref_feed: float = 300.0
+    # --- Sheeting (coffrage extrados/intrados) ---
+    sheeting_upper_mm: float = 0.0
+    sheeting_lower_mm: float = 0.0
+    # Allongement tangentiel du bord de fuite (mm)
+    tangent_extend_te_mm: float = 0.0
+    # Kerf différencié root/tip. Si > 0 : override le kerf des sections.
+    # Interpolé linéairement entre root et tip pour les panneaux intérieurs.
+    kerf_root_mm: float = 0.0
+    kerf_tip_mm: float = 0.0
+    use_differential_kerf: bool = False
 
 
 @dataclass
