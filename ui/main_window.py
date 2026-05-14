@@ -35,6 +35,7 @@ from .widgets.control_panel import ControlPanel
 from .widgets.dro import Dro
 from .widgets.gcode_panel import GcodePanel
 from .widgets.header_bar import HeaderBar
+from .widgets.fan_panel import FanPanel
 from .widgets.hotwire_panel import HotWirePanel
 from .widgets.jog_pad import JogPanel
 from .widgets.mdi import MdiPanel
@@ -102,6 +103,7 @@ class MainWindow(QMainWindow):
         self.dro = Dro()
         self.jog = JogPanel()
         self.hotwire = HotWirePanel(max_value=1000)
+        self.fan = FanPanel()
         self.overrides = OverridesPanel()
         self.mdi = MdiPanel()
         self.path = PathView()
@@ -135,6 +137,7 @@ class MainWindow(QMainWindow):
         v2.addWidget(self.dro)
         v2.addWidget(self.jog)
         v2.addWidget(self.hotwire)
+        v2.addWidget(self.fan)
         v2.addWidget(self.overrides)
         v2.addWidget(self.mdi)
         v2.addStretch(1)
@@ -271,6 +274,8 @@ class MainWindow(QMainWindow):
         # Fil chaud
         self.hotwire.turn_on_requested.connect(self._on_hotwire_on)
         self.hotwire.turn_off_requested.connect(self._on_hotwire_off)
+        self.fan.fan_on_requested.connect(self._on_fan_on)
+        self.fan.fan_off_requested.connect(self._on_fan_off)
         self.hotwire.set_power_requested.connect(self._on_hotwire_power)
 
         # Overrides realtime
@@ -616,6 +621,7 @@ class MainWindow(QMainWindow):
         self.status.append_info("Déconnecté")
         self._set_connected_ui(False)
         self.hotwire.set_on(False)
+        self.fan.set_on(False)
         self.settings.clear()
         self.settings.set_port("")
 
@@ -676,6 +682,15 @@ class MainWindow(QMainWindow):
         self.link.send_line(f"S{value}")
         if hasattr(self.webcam, "osd"):
             self.webcam.osd.on_hotwire(True, value)
+
+    def _on_fan_on(self) -> None:
+        # M8 = coolant flood ON → active la sortie 12V D10 du RAMPS
+        self.link.send_line("M8")
+        self.fan.set_on(True)
+
+    def _on_fan_off(self) -> None:
+        self.link.send_line("M9")
+        self.fan.set_on(False)
 
     def _on_simulate(self) -> None:
         """Lance la simulation du G-code chargé dans la vue 3D."""

@@ -49,6 +49,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "🆕  Nouveau": {"en": "🆕  New"},
     "ALLUMER LE FIL": {"en": "TURN WIRE ON"},
     "COUPER LE FIL": {"en": "TURN WIRE OFF"},
+    "ALLUMER LE VENTILATEUR": {"en": "TURN FAN ON"},
+    "COUPER LE VENTILATEUR": {"en": "TURN FAN OFF"},
     "ARRÊT D'URGENCE": {"en": "EMERGENCY STOP"},
     "Caméra": {"en": "Camera"},
     "Démarrer": {"en": "Start"},
@@ -73,6 +75,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "Position": {"en": "Position"},
     "Jogging": {"en": "Jogging"},
     "Fil chaud": {"en": "Hot wire"},
+    "Ventilateur RAMPS": {"en": "RAMPS fan"},
+    "Active la sortie 12V D10 du RAMPS via M8 (coolant flood). Branche le ventilateur sur cette sortie.":
+        {"en": "Turns on RAMPS 12V D10 output via M8 (coolant flood). Wire the fan to that output."},
     "MDI": {"en": "MDI"},
     "Préférences": {"en": "Preferences"},
     "Source": {"en": "Source"},
