@@ -10,6 +10,8 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QSplitter,
+    QFrame,
+    QScrollArea,
     QStatusBar,
     QStyle,
     QSystemTrayIcon,
@@ -20,7 +22,6 @@ from PySide6.QtWidgets import (
 
 from core import persistence
 from core.grbl_link import GrblLink, GrblStatus
-from core.grbl_protocol import CMD_COOLANT_FLOOD_TOGGLE
 from core.job_history import JobHistory, make_entry
 from core.job_runner import JobRunner
 from core.macros import MacroStore
@@ -131,9 +132,12 @@ class MainWindow(QMainWindow):
         v1.addWidget(self.status, 1)
         v1.addWidget(self.gcode, 2)
 
-        # Colonne 2 : DRO / jog / fil chaud / overrides / MDI
-        col2 = QWidget()
-        v2 = QVBoxLayout(col2)
+        # Colonne 2 : DRO / jog / fil chaud / ventilateur / overrides / MDI
+        # Contenu enveloppé dans un QScrollArea car la somme des hauteurs des
+        # widgets dépasse l'espace dispo sur des écrans de hauteur modérée
+        # (le MDI était coupé en bas en 1080p / 1440p selon les configs).
+        col2_inner = QWidget()
+        v2 = QVBoxLayout(col2_inner)
         v2.setContentsMargins(4, 4, 4, 4)
         v2.addWidget(self.dro)
         v2.addWidget(self.jog)
@@ -142,6 +146,12 @@ class MainWindow(QMainWindow):
         v2.addWidget(self.overrides)
         v2.addWidget(self.mdi)
         v2.addStretch(1)
+
+        col2 = QScrollArea()
+        col2.setWidget(col2_inner)
+        col2.setWidgetResizable(True)
+        col2.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        col2.setFrameShape(QFrame.NoFrame)
 
         # Colonne 3 : visualisations
         col3 = self.path
@@ -249,6 +259,8 @@ class MainWindow(QMainWindow):
         self.link.status_received.connect(self.state.update_from_status)
         # Watchdog : timestamp à chaque status reçu
         self.link.status_received.connect(self._on_status_for_watchdog)
+        # Synchro état ventilateur ↔ matériel via le champ `A:` du status
+        self.link.status_received.connect(self._on_status_for_fan)
         # Stop auto du job si on entre en Alarm
         self.state.state_changed.connect(self._on_state_changed_safety)
         self.state.state_changed.connect(self.header.on_state)
@@ -421,6 +433,22 @@ class MainWindow(QMainWindow):
         )
         self.status.append_info(msg)
         self.statusBar().showMessage(msg, 0)
+
+    def _on_status_for_fan(self, status) -> None:
+        """Synchronise l'état UI du ventilateur avec la réalité matérielle.
+
+        Grbl 1.1 rapporte les accessoires actifs dans le champ `A:` du status :
+          - 'F' = flood actif
+          - 'M' = mist actif
+          - 'S'/'C' = spindle CW/CCW
+        Ex: `<Idle|MPos:..|FS:..|A:SF>` → spindle ON et flood ON.
+
+        On lit cette info à chaque status report et on cale le bouton du
+        ventilateur dessus, ce qui garantit qu'aucun désync ne peut s'installer
+        (même en cas de M8/M9 dans le g-code, soft reset, ou changement
+        manuel via MDI)."""
+        flood_on = "F" in (status.accessory or "")
+        self.fan.set_on_silent(flood_on)
 
     def _on_status_for_watchdog(self, _status) -> None:
         import time
@@ -685,18 +713,17 @@ class MainWindow(QMainWindow):
             self.webcam.osd.on_hotwire(True, value)
 
     def _on_fan_on(self) -> None:
-        # On utilise la commande temps-réel `0xA0` (toggle flood) plutôt que
-        # `M8` g-code : M8 est mis en queue dans le planner et n'exécute le
-        # toggle qu'après une synchro (motion ou G4 P0). Le toggle realtime
-        # bypass le planner et bascule la sortie immédiatement.
-        # Note : c'est un TOGGLE — on ne l'envoie que si l'état UI est OFF.
-        if not self.fan._on:
-            self.link.send_realtime(CMD_COOLANT_FLOOD_TOGGLE)
+        # M8 = coolant flood ON, set explicite (pas un toggle). Idempotent :
+        # ré-envoyer M8 alors que c'est déjà ON ne fait rien de mauvais.
+        # Grbl exécute le changement de coolant en synchro avec le planner
+        # via mc_coolant() → protocol_buffer_synchronize() → coolant_set_state(),
+        # donc l'effet est immédiat en IDLE (buffer vide).
+        # L'état UI sera de toute façon recalé par _on_status (champ A:F).
+        self.link.send_line("M8")
         self.fan.set_on(True)
 
     def _on_fan_off(self) -> None:
-        if self.fan._on:
-            self.link.send_realtime(CMD_COOLANT_FLOOD_TOGGLE)
+        self.link.send_line("M9")
         self.fan.set_on(False)
 
     def _on_simulate(self) -> None:
@@ -753,8 +780,10 @@ class MainWindow(QMainWindow):
             self.status.append_info("Aucun programme chargé.")
             return
         # Démarrage automatique du ventilateur de refroidissement RAMPS
-        # avant de lancer la coupe. Utilise toujours la commande temps-réel
-        # (0xA0) pour bypasser le planner.
+        # avant de lancer la coupe. _on_fan_on() envoie M8 (idempotent), et
+        # le status report `A:F` recalera l'UI si elle n'était pas encore en
+        # sync. Si l'utilisateur l'avait déjà allumé manuellement, M8 ne fait
+        # qu'un no-op côté firmware.
         if not self.fan._on:
             self._on_fan_on()
         # Désactive temporairement le bouton et donne du feedback visuel.
