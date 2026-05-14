@@ -72,6 +72,42 @@ def build_report_html(
             f"(vitesse référence : {p.cut_params.kerf_ref_feed:.0f} mm/min)</td></tr>"
         )
 
+    spars_html = ""
+    if getattr(p, "spars", None):
+        rows = []
+        for i, sp in enumerate(p.spars):
+            rows.append(
+                f"<tr><td>{i + 1}</td><td>{_esc(sp.name)}</td><td>{sp.surface}</td>"
+                f"<td>{sp.x_root_mm:.1f} → {sp.x_tip_mm:.1f} mm</td>"
+                f"<td>{sp.width_root_mm:.1f} → {sp.width_tip_mm:.1f} mm</td>"
+                f"<td>{sp.depth_root_mm:.1f} → {sp.depth_tip_mm:.1f} mm</td></tr>"
+            )
+        spars_html = (
+            "<h2>Longerons</h2>"
+            "<table><tr><th>#</th><th>Nom</th><th>Surface</th>"
+            "<th>X (root → tip)</th><th>Largeur</th><th>Profondeur</th></tr>"
+            f"{''.join(rows)}</table>"
+        )
+
+    holes_html = ""
+    if getattr(p, "lightening_holes", None):
+        rows = []
+        for i, h in enumerate(p.lightening_holes):
+            rows.append(
+                f"<tr><td>{i + 1}</td><td>{_esc(h.name)}</td><td>{h.shape}</td>"
+                f"<td>{h.rib_edge_thickness_pct:.0f} %</td>"
+                f"<td>{h.x_start_root_mm:.0f}…{h.x_end_root_mm:.0f}</td>"
+                f"<td>{h.x_start_tip_mm:.0f}…{h.x_end_tip_mm:.0f}</td></tr>"
+            )
+        holes_html = (
+            "<h2>Trous d'allègement (gabarits nervures)</h2>"
+            "<p class='meta'><i>Pour fabrication de nervures balsa séparée — "
+            "pas inclus dans le G-code mousse.</i></p>"
+            "<table><tr><th>#</th><th>Nom</th><th>Forme</th><th>Bord</th>"
+            "<th>X root</th><th>X tip</th></tr>"
+            f"{''.join(rows)}</table>"
+        )
+
     notes_html = ""
     if notes:
         notes_html = (
@@ -131,6 +167,10 @@ def build_report_html(
     <tr><th>Mode de génération</th><td>{p.cut_params.mode}</td></tr>
     {adaptive_kerf_html}
 </table>
+
+{spars_html}
+
+{holes_html}
 
 {estimate_html}
 

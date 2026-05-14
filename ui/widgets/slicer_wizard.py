@@ -35,9 +35,12 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMessageBox,
     QPushButton,
     QSpinBox,
+    QSplitter,
     QVBoxLayout,
     QWidget,
     QWizard,
@@ -46,6 +49,7 @@ from PySide6.QtWidgets import (
 
 from gcode.profiles import Profile, load_profile, resample
 from gcode.slicer import CutGeometry, CutParams, generate_gcode_wing
+from gcode.spars import LighteningHole, Spar
 from gcode.wing import Section, WingDefinition
 
 from .airfoil_library import AirfoilLibraryDialog
@@ -78,6 +82,10 @@ class _Shared:
         self.use_differential_kerf: bool = False
         self.kerf_root_mm: float = 1.0
         self.kerf_tip_mm: float = 1.0
+
+        # Spars + lightening holes
+        self.spars: list[Spar] = []
+        self.lightening_holes: list[LighteningHole] = []
 
         # Block placement
         self.wire_span_mm: float = 1000.0
@@ -421,20 +429,163 @@ class _SparsPage(QWizardPage):
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self.setTitle("4. Longerons (spars)")
-        self.setSubTitle("Encoches dans le profil pour le passage des longerons.")
-        lbl = QLabel(
-            "🚧 Fonctionnalité en cours d'implémentation (Step 2 de la refonte).\n\n"
-            "Tu pourras bientôt définir ici :\n"
-            "  • position et type de longeron (boîte, place, etc.)\n"
-            "  • profil tapered ou constant\n"
-            "  • alignement haut / bas / Y manuel\n"
-            "  • coupe descendante avec chemin vertical supplémentaire\n\n"
-            "Pour l'instant, le wizard ignore cette étape."
+        self.setSubTitle(
+            "Encoches rectangulaires dans le profil pour le passage des "
+            "longerons. Position en mm depuis le bord d'attaque."
         )
-        lbl.setWordWrap(True)
+
+        self._suppress_form_sync = False
+
+        # Liste
+        self.lst = QListWidget()
+        self.btn_add = QPushButton("➕  Ajouter")
+        self.btn_del = QPushButton("🗑  Supprimer")
+        self.btn_del.setEnabled(False)
+        side_actions = QHBoxLayout()
+        side_actions.addWidget(self.btn_add)
+        side_actions.addWidget(self.btn_del)
+        side_actions.addStretch(1)
+        side = QVBoxLayout()
+        side.addWidget(QLabel("Liste des longerons :"))
+        side.addWidget(self.lst, 1)
+        side.addLayout(side_actions)
+        side_widget = QWidget()
+        side_widget.setLayout(side)
+
+        # Form
+        self.le_name = QLineEdit()
+        self.le_name.setPlaceholderText("nom optionnel")
+        self.cb_surface = QComboBox()
+        self.cb_surface.addItem("Extrados (upper)", "upper")
+        self.cb_surface.addItem("Intrados (lower)", "lower")
+
+        self.sb_x_root = self._mk_spin(0, 1000, 30.0, " mm")
+        self.sb_x_tip = self._mk_spin(0, 1000, 30.0, " mm")
+        self.sb_w_root = self._mk_spin(0.5, 50, 8.0, " mm", decimals=2)
+        self.sb_w_tip = self._mk_spin(0.5, 50, 8.0, " mm", decimals=2)
+        self.sb_d_root = self._mk_spin(0.5, 50, 5.0, " mm", decimals=2)
+        self.sb_d_tip = self._mk_spin(0.5, 50, 5.0, " mm", decimals=2)
+
+        form = QFormLayout()
+        form.addRow("Nom :", self.le_name)
+        form.addRow("Surface :", self.cb_surface)
+        form.addRow("X emplanture :", self.sb_x_root)
+        form.addRow("X saumon :", self.sb_x_tip)
+        form.addRow("Largeur emplanture :", self.sb_w_root)
+        form.addRow("Largeur saumon :", self.sb_w_tip)
+        form.addRow("Profondeur emplanture :", self.sb_d_root)
+        form.addRow("Profondeur saumon :", self.sb_d_tip)
+
+        self.gb_form = QGroupBox("Longeron sélectionné")
+        self.gb_form.setLayout(form)
+        self.gb_form.setEnabled(False)
+
+        split = QSplitter(Qt.Horizontal)
+        split.addWidget(side_widget)
+        split.addWidget(self.gb_form)
+        split.setStretchFactor(0, 1)
+        split.setStretchFactor(1, 2)
+
         v = QVBoxLayout(self)
-        v.addWidget(lbl)
-        v.addStretch(1)
+        v.addWidget(split, 1)
+
+        self.btn_add.clicked.connect(self._add)
+        self.btn_del.clicked.connect(self._delete)
+        self.lst.currentRowChanged.connect(self._on_row_changed)
+        # Sync edits → modèle
+        self.le_name.textChanged.connect(self._sync_to_model)
+        self.cb_surface.currentIndexChanged.connect(self._sync_to_model)
+        for sb in (self.sb_x_root, self.sb_x_tip,
+                   self.sb_w_root, self.sb_w_tip,
+                   self.sb_d_root, self.sb_d_tip):
+            sb.valueChanged.connect(self._sync_to_model)
+
+    @staticmethod
+    def _mk_spin(mn, mx, val, suffix, decimals=1) -> QDoubleSpinBox:
+        sb = QDoubleSpinBox()
+        sb.setRange(mn, mx)
+        sb.setValue(val)
+        sb.setSuffix(suffix)
+        sb.setDecimals(decimals)
+        return sb
+
+    def initializePage(self) -> None:
+        s = self.wizard().shared
+        self.lst.clear()
+        for sp in s.spars:
+            self.lst.addItem(self._label_for(sp))
+        if s.spars:
+            self.lst.setCurrentRow(0)
+
+    @staticmethod
+    def _label_for(sp: Spar) -> str:
+        name = sp.name or "(sans nom)"
+        return f"{name} — {sp.surface} @ x={sp.x_root_mm:.0f}…{sp.x_tip_mm:.0f}"
+
+    def _add(self) -> None:
+        s = self.wizard().shared
+        x_default = max(20.0, self.wizard().shared.root_chord_mm * 0.3)
+        sp = Spar(
+            name=f"longeron {len(s.spars) + 1}",
+            x_root_mm=x_default, x_tip_mm=x_default,
+        )
+        s.spars.append(sp)
+        self.lst.addItem(self._label_for(sp))
+        self.lst.setCurrentRow(self.lst.count() - 1)
+
+    def _delete(self) -> None:
+        s = self.wizard().shared
+        i = self.lst.currentRow()
+        if i < 0:
+            return
+        s.spars.pop(i)
+        self.lst.takeItem(i)
+        self._refresh_form_enabled()
+
+    def _refresh_form_enabled(self) -> None:
+        i = self.lst.currentRow()
+        has = i >= 0
+        self.gb_form.setEnabled(has)
+        self.btn_del.setEnabled(has)
+
+    def _on_row_changed(self, row: int) -> None:
+        self._refresh_form_enabled()
+        if row < 0:
+            return
+        s = self.wizard().shared
+        if row >= len(s.spars):
+            return
+        sp = s.spars[row]
+        self._suppress_form_sync = True
+        self.le_name.setText(sp.name)
+        idx = self.cb_surface.findData(sp.surface)
+        if idx >= 0:
+            self.cb_surface.setCurrentIndex(idx)
+        self.sb_x_root.setValue(sp.x_root_mm)
+        self.sb_x_tip.setValue(sp.x_tip_mm)
+        self.sb_w_root.setValue(sp.width_root_mm)
+        self.sb_w_tip.setValue(sp.width_tip_mm)
+        self.sb_d_root.setValue(sp.depth_root_mm)
+        self.sb_d_tip.setValue(sp.depth_tip_mm)
+        self._suppress_form_sync = False
+
+    def _sync_to_model(self) -> None:
+        if self._suppress_form_sync:
+            return
+        i = self.lst.currentRow()
+        if i < 0:
+            return
+        s = self.wizard().shared
+        sp = s.spars[i]
+        sp.name = self.le_name.text().strip()
+        sp.surface = self.cb_surface.currentData()
+        sp.x_root_mm = self.sb_x_root.value()
+        sp.x_tip_mm = self.sb_x_tip.value()
+        sp.width_root_mm = self.sb_w_root.value()
+        sp.width_tip_mm = self.sb_w_tip.value()
+        sp.depth_root_mm = self.sb_d_root.value()
+        sp.depth_tip_mm = self.sb_d_tip.value()
+        self.lst.item(i).setText(self._label_for(sp))
 
 
 # ----------------------------------------------------------------------
@@ -442,22 +593,161 @@ class _SparsPage(QWizardPage):
 # ----------------------------------------------------------------------
 
 class _LighteningHolesPage(QWizardPage):
+    """Trous d'allègement : paramètres documentaires uniquement.
+
+    Un fil chaud 4 axes ne peut pas plonger au milieu du bloc, donc ces
+    trous ne sont PAS coupés dans la mousse. Les paramètres sont conservés
+    pour être inclus dans la fiche PDF (utile si tu génères des gabarits
+    de nervures balsa au laser à part)."""
+
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
-        self.setTitle("5. Trous d'allègement")
-        self.setSubTitle("Évidements dans les nervures.")
-        lbl = QLabel(
-            "🚧 Fonctionnalité en cours d'implémentation (Step 2 de la refonte).\n\n"
-            "Tu pourras bientôt définir :\n"
-            "  • forme (airfoil suiveur, rectangle, ellipse)\n"
-            "  • génération automatique le long de la corde\n"
-            "  • positions root / tip\n\n"
-            "Pour l'instant, le wizard ignore cette étape."
+        self.setTitle("5. Trous d'allègement (documentaire)")
+        self.setSubTitle(
+            "Note : ces trous ne sont PAS coupés dans la mousse (un fil chaud "
+            "ne peut pas plonger). Ils sont sauvegardés dans le projet et "
+            "inclus dans la fiche PDF pour la fabrication de nervures balsa à part."
         )
-        lbl.setWordWrap(True)
+
+        self._suppress = False
+
+        self.lst = QListWidget()
+        self.btn_add = QPushButton("➕  Ajouter")
+        self.btn_del = QPushButton("🗑  Supprimer")
+        self.btn_del.setEnabled(False)
+        side_actions = QHBoxLayout()
+        side_actions.addWidget(self.btn_add)
+        side_actions.addWidget(self.btn_del)
+        side_actions.addStretch(1)
+        side = QVBoxLayout()
+        side.addWidget(QLabel("Trous d'allègement :"))
+        side.addWidget(self.lst, 1)
+        side.addLayout(side_actions)
+        side_widget = QWidget()
+        side_widget.setLayout(side)
+
+        self.le_name = QLineEdit()
+        self.cb_shape = QComboBox()
+        self.cb_shape.addItem("Suit le profil (airfoil)", "airfoil")
+        self.cb_shape.addItem("Rectangle", "rectangle")
+        self.cb_shape.addItem("Ellipse", "ellipse")
+        self.sb_edge = QDoubleSpinBox()
+        self.sb_edge.setRange(5, 80)
+        self.sb_edge.setSuffix(" %")
+        self.sb_edge.setValue(20.0)
+        self.cb_auto = QCheckBox("Génération automatique")
+        self.sb_xs_root = QDoubleSpinBox(); self.sb_xs_root.setRange(0, 1000); self.sb_xs_root.setSuffix(" mm"); self.sb_xs_root.setValue(50.0)
+        self.sb_xe_root = QDoubleSpinBox(); self.sb_xe_root.setRange(0, 1000); self.sb_xe_root.setSuffix(" mm"); self.sb_xe_root.setValue(100.0)
+        self.sb_xs_tip = QDoubleSpinBox(); self.sb_xs_tip.setRange(0, 1000); self.sb_xs_tip.setSuffix(" mm"); self.sb_xs_tip.setValue(50.0)
+        self.sb_xe_tip = QDoubleSpinBox(); self.sb_xe_tip.setRange(0, 1000); self.sb_xe_tip.setSuffix(" mm"); self.sb_xe_tip.setValue(100.0)
+
+        f = QFormLayout()
+        f.addRow("Nom :", self.le_name)
+        f.addRow("Forme :", self.cb_shape)
+        f.addRow("Épaisseur bord nervure :", self.sb_edge)
+        f.addRow(self.cb_auto)
+        f.addRow("X début emplanture :", self.sb_xs_root)
+        f.addRow("X fin emplanture :", self.sb_xe_root)
+        f.addRow("X début saumon :", self.sb_xs_tip)
+        f.addRow("X fin saumon :", self.sb_xe_tip)
+
+        self.gb_form = QGroupBox("Trou sélectionné")
+        self.gb_form.setLayout(f)
+        self.gb_form.setEnabled(False)
+
+        split = QSplitter(Qt.Horizontal)
+        split.addWidget(side_widget)
+        split.addWidget(self.gb_form)
+        split.setStretchFactor(0, 1)
+        split.setStretchFactor(1, 2)
+
         v = QVBoxLayout(self)
-        v.addWidget(lbl)
-        v.addStretch(1)
+        v.addWidget(split, 1)
+
+        self.btn_add.clicked.connect(self._add)
+        self.btn_del.clicked.connect(self._delete)
+        self.lst.currentRowChanged.connect(self._on_row_changed)
+        for w in (self.le_name, self.cb_shape, self.sb_edge, self.cb_auto,
+                  self.sb_xs_root, self.sb_xe_root, self.sb_xs_tip, self.sb_xe_tip):
+            if isinstance(w, QLineEdit):
+                w.textChanged.connect(self._sync)
+            elif isinstance(w, QComboBox):
+                w.currentIndexChanged.connect(self._sync)
+            elif isinstance(w, QCheckBox):
+                w.toggled.connect(self._sync)
+            else:
+                w.valueChanged.connect(self._sync)
+
+    @staticmethod
+    def _label(h: LighteningHole) -> str:
+        return f"{h.name or '(sans nom)'} — {h.shape} {h.x_start_root_mm:.0f}…{h.x_end_root_mm:.0f}"
+
+    def initializePage(self) -> None:
+        s = self.wizard().shared
+        self.lst.clear()
+        for h in s.lightening_holes:
+            self.lst.addItem(self._label(h))
+        if s.lightening_holes:
+            self.lst.setCurrentRow(0)
+
+    def _add(self) -> None:
+        s = self.wizard().shared
+        h = LighteningHole(name=f"trou {len(s.lightening_holes) + 1}")
+        s.lightening_holes.append(h)
+        self.lst.addItem(self._label(h))
+        self.lst.setCurrentRow(self.lst.count() - 1)
+
+    def _delete(self) -> None:
+        s = self.wizard().shared
+        i = self.lst.currentRow()
+        if i < 0:
+            return
+        s.lightening_holes.pop(i)
+        self.lst.takeItem(i)
+        has = self.lst.currentRow() >= 0
+        self.gb_form.setEnabled(has)
+        self.btn_del.setEnabled(has)
+
+    def _on_row_changed(self, row: int) -> None:
+        has = row >= 0
+        self.gb_form.setEnabled(has)
+        self.btn_del.setEnabled(has)
+        if row < 0:
+            return
+        s = self.wizard().shared
+        if row >= len(s.lightening_holes):
+            return
+        h = s.lightening_holes[row]
+        self._suppress = True
+        self.le_name.setText(h.name)
+        idx = self.cb_shape.findData(h.shape)
+        if idx >= 0:
+            self.cb_shape.setCurrentIndex(idx)
+        self.sb_edge.setValue(h.rib_edge_thickness_pct)
+        self.cb_auto.setChecked(h.automatic)
+        self.sb_xs_root.setValue(h.x_start_root_mm)
+        self.sb_xe_root.setValue(h.x_end_root_mm)
+        self.sb_xs_tip.setValue(h.x_start_tip_mm)
+        self.sb_xe_tip.setValue(h.x_end_tip_mm)
+        self._suppress = False
+
+    def _sync(self) -> None:
+        if self._suppress:
+            return
+        i = self.lst.currentRow()
+        if i < 0:
+            return
+        s = self.wizard().shared
+        h = s.lightening_holes[i]
+        h.name = self.le_name.text().strip()
+        h.shape = self.cb_shape.currentData()
+        h.rib_edge_thickness_pct = self.sb_edge.value()
+        h.automatic = self.cb_auto.isChecked()
+        h.x_start_root_mm = self.sb_xs_root.value()
+        h.x_end_root_mm = self.sb_xe_root.value()
+        h.x_start_tip_mm = self.sb_xs_tip.value()
+        h.x_end_tip_mm = self.sb_xe_tip.value()
+        self.lst.item(i).setText(self._label(h))
 
 
 # ----------------------------------------------------------------------
@@ -636,6 +926,11 @@ class _FinalPage(QWizardPage):
             f"<li><b>Bloc</b> : T={s.block_thickness_mm:.0f} mm, "
             f"H={s.height_root_mm:.0f}/{s.height_tip_mm:.0f}, "
             f"D={s.distance_root_mm:.0f}/{s.distance_tip_mm:.0f}</li>"
+            f"<li><b>Longerons</b> : {len(s.spars)} "
+            f"({sum(1 for sp in s.spars if sp.surface == 'upper')} extrados, "
+            f"{sum(1 for sp in s.spars if sp.surface == 'lower')} intrados)</li>"
+            f"<li><b>Trous d'allègement</b> : {len(s.lightening_holes)} "
+            f"(documentaire uniquement, pas dans le G-code)</li>"
             f"</ul>"
         )
 
@@ -756,4 +1051,4 @@ class SlicerWizard(QWizard):
             kerf_tip_mm=s.kerf_tip_mm,
         )
 
-        return generate_gcode_wing(wing, geom, params, mode="single")
+        return generate_gcode_wing(wing, geom, params, mode="single", spars=s.spars)

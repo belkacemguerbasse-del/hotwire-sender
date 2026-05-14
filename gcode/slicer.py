@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from .profiles import Profile, extend_trailing_edge, resample, sheeting_offset
+from .spars import Spar, insert_spars
 from .wing import Section, WingDefinition
 
 
@@ -122,6 +123,14 @@ def _apply_sheeting_and_te(p: Profile, params: CutParams) -> Profile:
     if params.tangent_extend_te_mm > 1e-9:
         out = extend_trailing_edge(out, params.tangent_extend_te_mm)
     return out
+
+
+def _apply_spars(p: Profile, spars: list[Spar], t: float) -> Profile:
+    """Insère les longerons dans le profil transformé. `t` ∈ [0, 1] : position
+    normalisée dans le panneau (0 = root, 1 = tip)."""
+    if not spars:
+        return p
+    return insert_spars(p, spars, t)
 
 
 def project(
@@ -239,6 +248,7 @@ def generate_gcode_wing(
     geom: CutGeometry,
     params: CutParams,
     mode: Literal["single", "split"] = "single",
+    spars: list[Spar] | None = None,
 ) -> list[str] | list[list[str]]:
     """Génère le G-code pour une aile multi-panneaux.
 
@@ -256,6 +266,15 @@ def generate_gcode_wing(
         raise ValueError("Toutes les sections doivent avoir un profil chargé.")
     # Sheeting (coffrage) + allongement TE appliqués après kerf
     transformed = [_apply_sheeting_and_te(p, params) for p in transformed]
+    # Longerons : interpolation t ∈ [0, 1] par section selon span_y
+    if spars:
+        y_root = sections[0].span_y_mm
+        y_tip = sections[-1].span_y_mm
+        span = y_tip - y_root if (y_tip - y_root) > 1e-9 else 1.0
+        transformed = [
+            _apply_spars(p, spars, (s.span_y_mm - y_root) / span)
+            for p, s in zip(transformed, sections)
+        ]
 
     if mode == "split":
         out_files: list[list[str]] = []

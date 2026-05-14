@@ -17,6 +17,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from .spars import LighteningHole, Spar
 from .wing import WingDefinition
 
 PROJECT_FORMAT = "hotwire-project"
@@ -64,6 +65,8 @@ class HotWireProject:
     wing: WingDefinition = field(default_factory=WingDefinition)
     geometry: CutGeometryDict = field(default_factory=CutGeometryDict)
     cut_params: CutParamsDict = field(default_factory=CutParamsDict)
+    spars: list[Spar] = field(default_factory=list)
+    lightening_holes: list[LighteningHole] = field(default_factory=list)
     notes: str = ""
 
     def to_dict(self) -> dict:
@@ -74,6 +77,8 @@ class HotWireProject:
             "wing": self.wing.to_dict(),
             "geometry": asdict(self.geometry),
             "cut_params": asdict(self.cut_params),
+            "spars": [s.to_dict() for s in self.spars],
+            "lightening_holes": [h.to_dict() for h in self.lightening_holes],
             "notes": self.notes,
         }
 
@@ -95,6 +100,8 @@ class HotWireProject:
             wing=WingDefinition.from_dict(d.get("wing", {})),
             geometry=CutGeometryDict(**d.get("geometry", {})),
             cut_params=CutParamsDict(**d.get("cut_params", {})),
+            spars=[Spar.from_dict(s) for s in d.get("spars", [])],
+            lightening_holes=[LighteningHole.from_dict(h) for h in d.get("lightening_holes", [])],
             notes=d.get("notes", ""),
         )
 
