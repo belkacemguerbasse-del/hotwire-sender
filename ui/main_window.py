@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from core import persistence
 from core.grbl_link import GrblLink, GrblStatus
+from core.grbl_protocol import CMD_COOLANT_FLOOD_TOGGLE
 from core.job_history import JobHistory, make_entry
 from core.job_runner import JobRunner
 from core.macros import MacroStore
@@ -684,12 +685,18 @@ class MainWindow(QMainWindow):
             self.webcam.osd.on_hotwire(True, value)
 
     def _on_fan_on(self) -> None:
-        # M8 = coolant flood ON → active la sortie 12V D10 du RAMPS
-        self.link.send_line("M8")
+        # On utilise la commande temps-réel `0xA0` (toggle flood) plutôt que
+        # `M8` g-code : M8 est mis en queue dans le planner et n'exécute le
+        # toggle qu'après une synchro (motion ou G4 P0). Le toggle realtime
+        # bypass le planner et bascule la sortie immédiatement.
+        # Note : c'est un TOGGLE — on ne l'envoie que si l'état UI est OFF.
+        if not self.fan._on:
+            self.link.send_realtime(CMD_COOLANT_FLOOD_TOGGLE)
         self.fan.set_on(True)
 
     def _on_fan_off(self) -> None:
-        self.link.send_line("M9")
+        if self.fan._on:
+            self.link.send_realtime(CMD_COOLANT_FLOOD_TOGGLE)
         self.fan.set_on(False)
 
     def _on_simulate(self) -> None:
@@ -745,6 +752,11 @@ class MainWindow(QMainWindow):
         if not self.job._lines and not self.gcode.lines():
             self.status.append_info("Aucun programme chargé.")
             return
+        # Démarrage automatique du ventilateur de refroidissement RAMPS
+        # avant de lancer la coupe. Utilise toujours la commande temps-réel
+        # (0xA0) pour bypasser le planner.
+        if not self.fan._on:
+            self._on_fan_on()
         # Désactive temporairement le bouton et donne du feedback visuel.
         # Defer le travail au prochain tick de l'event loop pour que
         # l'UI se peigne immédiatement (sans attendre le pump).
